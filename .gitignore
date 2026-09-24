@@ -1,0 +1,11 @@
+# Large data files
+data/
+*.xlsx
+*.parquet
+*.csv
+
+# Python cache
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
