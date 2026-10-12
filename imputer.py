@@ -222,6 +222,25 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
         progress.update(dedup_task, completed=100)
     console.print(f" [bold green][OK][/bold green] Purged [bold yellow]{exact_dups:,}[/bold yellow] exact duplicates ({len(df):,} clean transaction rows remain).")
 
+    # Step 2.5: Union Deletion Steps (B.1 & B.2 - Deletion Budget ≤ 10%)
+    df['Invoice'] = df['Invoice'].astype(str).str.strip()
+    df['StockCode'] = df['StockCode'].astype(str).str.strip().str.upper()
+    df['Country'] = df['Country'].astype(str).str.strip()
+
+    admin_stockcodes = {
+        'POST', 'DOT', 'M', 'C2', 'D', 'S', 'BANK CHARGES', 'ADJUST', 
+        'AMAZONFEE', 'DCGS0058', 'DCGS0068', 'DCGS0069', 'DCGS0070', 'DCGS0076',
+        'DCGSSGIRL', 'DCGSSBOY', 'PADS', 'TEST', 'B', 'CRUK'
+    }
+    is_admin = df['StockCode'].isin(admin_stockcodes) | df['StockCode'].str.startswith('GIFT_0001_')
+    is_missing_desc = df['Description'].isna() | (df['Description'].astype(str).str.strip() == '')
+    is_non_uk_missing_cust = df['Customer ID'].isna() & (df['Country'] != 'United Kingdom')
+
+    union_delete_mask = is_admin | is_missing_desc | is_non_uk_missing_cust
+    total_union_deleted = union_delete_mask.sum()
+    df = df[~union_delete_mask].copy()
+    console.print(f" [bold green][OK][/bold green] Purged [bold yellow]{total_union_deleted:,}[/bold yellow] rows via union deletion (Admin SKU, blank Desc, non-UK blank Customer ID).")
+
     # Step 3: Diagnostic Resolution & Smart Imputation
     with Progress(
         SpinnerColumn("dots", style="cyan"),
@@ -232,68 +251,45 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
     ) as progress:
         impute_task = progress.add_task("[3/5] Resolving timestamps, countries & SKU descriptions...", total=100)
         
-        # Standardize strings
-        df['Invoice'] = df['Invoice'].astype(str).str.strip()
-        df['StockCode'] = df['StockCode'].astype(str).str.strip().str.upper()
-        df['Country'] = df['Country'].astype(str).str.strip()
+        # A. Resolve multi-timestamp invoices -> Take MIN(InvoiceDate)
         df['InvoiceDate'] = pd.to_datetime(df['InvoiceDate'])
-        progress.update(impute_task, completed=15)
-        
-        # A. Resolve 83 multi-timestamp invoices -> Take MIN(InvoiceDate)
         inv_min_dates = df.groupby('Invoice')['InvoiceDate'].transform('min')
         df['InvoiceDate'] = inv_min_dates
-        progress.update(impute_task, completed=30)
+        progress.update(impute_task, completed=25)
         
-        # B. Impute Descriptions: Cross-reference by StockCode Mode
-        valid_desc = df.dropna(subset=['Description']).copy()
-        valid_desc['Description'] = valid_desc['Description'].astype(str).str.strip().str.upper()
-        
-        stock_to_desc = (
-            valid_desc[valid_desc['Description'].str.len() > 2]
+        # B. Standardize descriptions: Mode per StockCode
+        df['Description'] = df['Description'].astype(str).str.strip().str.upper()
+        stock_mode_desc = (
+            df[df['Description'].str.len() > 1]
             .groupby('StockCode')['Description']
-            .agg(lambda x: x.mode()[0] if not x.empty else None)
+            .agg(lambda s: s.mode()[0] if not s.empty else 'UNLISTED RETAIL ITEM')
             .to_dict()
         )
+        df['Description'] = df['StockCode'].map(stock_mode_desc).fillna(df['Description'])
+        progress.update(impute_task, completed=50)
+
+        # C. Impute Price == 0 for legitimate items (Quantity > 0)
+        valid_prices = df[df['Price'] > 0]
+        stock_avg_price = valid_prices.groupby('StockCode')['Price'].mean().to_dict()
+        price_zero_mask = (df['Price'] == 0) & (df['Quantity'] > 0)
+        df.loc[price_zero_mask, 'Price'] = df.loc[price_zero_mask, 'StockCode'].map(stock_avg_price).fillna(0.00).round(2)
+        progress.update(impute_task, completed=75)
         
-        is_invalid_desc = (
-            df['Description'].isna() | 
-            df['Description'].astype(str).str.strip().str.lower().isin(['', '?', 'check', 'nan'])
-        )
-        mapped_desc = df['StockCode'].map(stock_to_desc)
-        fallback_desc = "UNLISTED RETAIL ITEM " + df['StockCode']
-        
-        # Also standardize all descriptions to the SKU mode for consistency
-        df['Description'] = df['StockCode'].map(stock_to_desc).fillna(df['Description'].astype(str).str.strip().str.upper())
-        df.loc[is_invalid_desc, 'Description'] = mapped_desc[is_invalid_desc].fillna(fallback_desc[is_invalid_desc])
-        progress.update(impute_task, completed=60)
-        
-        # C. Missing Customer ID Imputation (Regional Guest Accounts)
-        initial_missing_cust = df['Customer ID'].isnull().sum()
-        missing_cust_countries = sorted(df[df['Customer ID'].isnull()]['Country'].unique())
-        country_to_guest_id = {
-            country: guest_prefix + idx + 1 
-            for idx, country in enumerate(missing_cust_countries)
-        }
-        
-        df['Customer_ID_Clean'] = (
-            df['Customer ID']
-            .fillna(df['Country'].map(country_to_guest_id))
-            .astype(int)
-        )
-        progress.update(impute_task, completed=80)
-        
-        # D. Resolve 13 Customer ID drifting countries -> Majority Mode per customer
+        # D. Single Guest Account (customer_id = 0, UK) & Majority Country per Customer
+        df['Customer_ID_Clean'] = df['Customer ID'].fillna(0).astype(int)
         cust_majority_country = (
-            df.groupby('Customer_ID_Clean')['Country']
-            .agg(lambda x: x.mode()[0] if not x.empty else 'United Kingdom')
+            df[df['Customer_ID_Clean'] > 0]
+            .groupby('Customer_ID_Clean')['Country']
+            .agg(lambda s: s.mode()[0] if not s.empty else 'United Kingdom')
             .to_dict()
         )
+        cust_majority_country[0] = 'United Kingdom'
         df['Customer_Primary_Country'] = df['Customer_ID_Clean'].map(cust_majority_country)
         progress.update(impute_task, completed=100)
 
     console.print(f" [bold green][OK][/bold green] Unified timestamps for all invoices (MIN date rule applied).")
-    console.print(f" [bold green][OK][/bold green] Standardized descriptions across SKUs and imputed uncataloged titles.")
-    console.print(f" [bold green][OK][/bold green] Allocated [bold yellow]{initial_missing_cust:,}[/bold yellow] guest checkouts to {len(country_to_guest_id)} regional Guest Accounts.")
+    console.print(f" [bold green][OK][/bold green] Standardized descriptions across SKUs and recovered Price=0 rows.")
+    console.print(f" [bold green][OK][/bold green] Allocated all anonymous UK checkouts to Single Guest Account (customer_id = 0).")
 
     # Step 4: 3NF Relational Deconstruction
     with Progress(
@@ -306,17 +302,15 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
         deconstruct_task = progress.add_task("[4/5] Deconstructing into 3NF relational schema...", total=100)
         
         # 1. Table: CUSTOMER
-        # PK: customer_id | Attributes: customer_type, country (primary residence)
         cust_df = df[['Customer_ID_Clean', 'Customer_Primary_Country']].drop_duplicates(subset=['Customer_ID_Clean']).copy()
         cust_df.rename(columns={'Customer_ID_Clean': 'customer_id', 'Customer_Primary_Country': 'country'}, inplace=True)
         cust_df['customer_type'] = cust_df['customer_id'].apply(
-            lambda cid: 'Guest' if cid >= guest_prefix else 'Registered'
+            lambda cid: 'Guest' if cid == 0 else 'Registered'
         )
         cust_df.sort_values(by='customer_id', inplace=True)
         progress.update(deconstruct_task, completed=25)
 
         # 2. Table: PRODUCT
-        # PK: stock_code | Attributes: description, current_unit_price (median of positive transactions)
         valid_prices = df[df['Price'] > 0]
         stock_to_median_price = valid_prices.groupby('StockCode')['Price'].median().to_dict()
         
@@ -328,15 +322,24 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
         prod_df = prod_base.sort_values(by='stock_code')
         progress.update(deconstruct_task, completed=50)
 
-        # 3. Table: INVENTORY (Phase 4 Trigger Requirement)
+        # 3. Table: INVENTORY
         inventory_df = prod_df[['stock_code']].copy()
         inventory_df['stock_level'] = 1000
         inventory_df['last_updated'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         progress.update(deconstruct_task, completed=65)
 
         # 4. Table: INVOICE
-        # PK: invoice_no | Attributes: invoice_date, customer_id (FK), country (shipping destination), status
-        # Three-way status: 'Cancelled' if starts with C, 'Loss' if negative qty & not C, else 'Completed'
+        is_c_invoice = df['Invoice'].str.startswith('C')
+        is_loss_line = (~is_c_invoice) & (df['Quantity'] < 0)
+
+        line_status = pd.Series('Completed', index=df.index)
+        line_status[is_c_invoice] = 'Cancelled'
+        line_status[is_loss_line] = 'Loss'
+        df['Line_Status'] = line_status
+
+        # Invoice-level majority status rule
+        inv_majority_status = df.groupby('Invoice')['Line_Status'].agg(lambda s: s.mode()[0]).to_dict()
+        
         inv_base = df[['Invoice', 'InvoiceDate', 'Customer_ID_Clean', 'Country']].drop_duplicates(subset=['Invoice']).copy()
         inv_base.rename(columns={
             'Invoice': 'invoice_no',
@@ -344,25 +347,14 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
             'Customer_ID_Clean': 'customer_id',
             'Country': 'country'
         }, inplace=True)
-        
-        # Check if invoice has cancellations or losses
-        inv_quantities = df.groupby('Invoice')['Quantity'].min().to_dict()
-        
-        def classify_status(row):
-            inv = str(row['invoice_no'])
-            if inv.startswith('C'):
-                return 'Cancelled'
-            min_q = inv_quantities.get(row['invoice_no'], 0)
-            if min_q < 0:
-                return 'Loss'
-            return 'Completed'
-
-        inv_base['status'] = inv_base.apply(classify_status, axis=1)
+        inv_base['status'] = inv_base['invoice_no'].map(inv_majority_status)
         inv_df = inv_base.sort_values(by='invoice_date')
         progress.update(deconstruct_task, completed=80)
 
+        # Convert Qty -> ABS for Cancelled as specified in document B.3 #3
+        df.loc[is_c_invoice, 'Quantity'] = df.loc[is_c_invoice, 'Quantity'].abs()
+
         # 5. Table: INVOICE_LINE
-        # PK: line_id | Attributes: invoice_no (FK), stock_code (FK), quantity, unit_price_at_sale
         items_df = pd.DataFrame({
             'invoice_no': df['Invoice'],
             'stock_code': df['StockCode'],

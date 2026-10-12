@@ -98,16 +98,20 @@ JOIN invoice i
 JOIN invoice_line l 
     ON i.invoice_no = l.invoice_no
 WHERE i.status = 'Completed'
+  AND c.customer_type = 'Registered'
 GROUP BY c.customer_id, c.customer_type, c.country
 HAVING SUM(l.quantity * l.unit_price_at_sale) > (
-    -- Subquery: Average total spend across all purchasing customers
+    -- Subquery: Average total spend across all purchasing registered customers
     SELECT AVG(customer_spend)
     FROM (
         SELECT SUM(sub_l.quantity * sub_l.unit_price_at_sale) AS customer_spend
         FROM invoice sub_i
         JOIN invoice_line sub_l 
             ON sub_i.invoice_no = sub_l.invoice_no
+        JOIN customer sub_c
+            ON sub_i.customer_id = sub_c.customer_id
         WHERE sub_i.status = 'Completed'
+          AND sub_c.customer_type = 'Registered'
         GROUP BY sub_i.customer_id
     ) AS all_customers_summary
 )

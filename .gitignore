@@ -4,6 +4,14 @@ data/
 *.parquet
 *.csv
 
+# Environment variables & secrets
+.env
+*.env
+
+# Local SQLite databases
+*.db
+*.sqlite
+
 # Python cache
 __pycache__/
 *.py[cod]
