@@ -143,7 +143,7 @@ def inspect_raw_dataset(input_file: Path):
         recom_table.add_row(
             "Anonymous Guest Transactions",
             f"{missing_c:,} missing customer records",
-            "Map to deterministic Regional Guest Accounts (90001+) by country. Preserves 100% of telemetry."
+            "Map to Single Guest Account (customer_id = 0, UK). Preserves 100% of telemetry and satisfies NOT NULL foreign key constraints."
         )
 
     desc_col = next((c for c in df.columns if 'desc' in c.lower() or 'title' in c.lower() or 'name' in c.lower()), None)
@@ -543,7 +543,7 @@ def audit_and_repair_processed(data_dir: Path):
         stat_table.add_row("Cancelled Customer Invoices", f"{len(dfs['INVOICE'][dfs['INVOICE']['status'] == 'Cancelled']):,}")
         stat_table.add_row("Warehouse Loss / Damage Adjustments", f"{len(dfs['INVOICE'][dfs['INVOICE']['status'] == 'Loss']):,}")
         stat_table.add_row("Registered Member Accounts", f"{len(dfs['CUSTOMER'][dfs['CUSTOMER']['customer_type'] == 'Registered']):,}")
-        stat_table.add_row("Regional Guest Customer Accounts", f"{len(dfs['CUSTOMER'][dfs['CUSTOMER']['customer_type'] == 'Guest']):,}")
+        stat_table.add_row("Guest Customer Accounts", f"{len(dfs['CUSTOMER'][dfs['CUSTOMER']['customer_type'] == 'Guest']):,}")
         stat_table.add_row("Catalog Product SKUs", f"{len(dfs['PRODUCT']):,}")
         stat_table.add_row("Active Invoice Line Transactions", f"{len(dfs['INVOICE_LINE']):,}")
         stat_table.add_row("Net Calculated Retail Revenue", f"${lines['line_total'].sum():,.2f}")
@@ -604,7 +604,7 @@ def interactive_menu(input_path: Path, output_path: Path, guest_prefix: int):
         path_panel.add_column(style="cyan")
         path_panel.add_row("Input File Path :", str(input_path))
         path_panel.add_row("Output Directory:", str(output_path))
-        path_panel.add_row("Guest ID Prefix :", str(guest_prefix))
+        path_panel.add_row("Guest Account ID :", str(guest_prefix))
         console.print(Panel(path_panel, title="[bold cyan]Active Configuration[/bold cyan]", box=box.ROUNDED))
         console.print()
         
@@ -685,7 +685,7 @@ def main():
     )
     parser.add_argument("--input", "-i", type=Path, default=default_input, help="Path to raw dataset (.csv/.xlsx)")
     parser.add_argument("--output", "-o", type=Path, default=default_output, help="Destination directory for 3NF tables")
-    parser.add_argument("--guest-prefix", type=int, default=90000, help="Base numeric ID prefix for regional Guest Accounts")
+    parser.add_argument("--guest-id", "--guest-prefix", dest="guest_prefix", type=int, default=0, help="ID for guest customer account (default: 0 for single guest)")
     parser.add_argument("--inspect", action="store_true", help="Run pre-run diagnostics and pattern inspection directly")
     parser.add_argument("--clean", action="store_true", help="Run cleaning and 3NF normalization directly")
     parser.add_argument("--verify", action="store_true", help="Run anomaly audit directly")

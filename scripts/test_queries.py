@@ -1,3 +1,10 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "rich>=13.7.0",
+# ]
+# ///
+
 import sqlite3
 from pathlib import Path
 from rich.console import Console

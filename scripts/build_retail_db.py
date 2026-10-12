@@ -1,3 +1,12 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "pandas>=2.2.0",
+#     "openpyxl>=3.1.2",
+#     "rich>=13.7.0",
+# ]
+# ///
+
 import sys
 import time
 import sqlite3
@@ -69,18 +78,18 @@ def execute_pipeline():
     overlap_count = (is_admin.astype(int) + is_missing_desc.astype(int) + is_non_uk_missing_cust.astype(int) > 1).sum()
     total_union_deleted = union_delete_mask.sum()
 
-    console.print(f"   • StockCode Admin (gross): {is_admin.sum():,}")
-    console.print(f"   • Description Kosong (gross): {is_missing_desc.sum():,}")
-    console.print(f"   • Customer ID Non-UK Kosong (gross): {is_non_uk_missing_cust.sum():,}")
-    console.print(f"   • Overlap (>1 kategori): {overlap_count:,}")
-    console.print(f" [bold green][Step 2-4][/bold green] Union Terhapus: {total_union_deleted:,} baris.")
+    console.print(f"   • Administrative StockCodes (gross): {is_admin.sum():,}")
+    console.print(f"   • Missing Descriptions (gross): {is_missing_desc.sum():,}")
+    console.print(f"   • Non-UK Missing Customer IDs (gross): {is_non_uk_missing_cust.sum():,}")
+    console.print(f"   • Overlapping rows (>1 category): {overlap_count:,}")
+    console.print(f" [bold green][Step 2-4][/bold green] Union rows purged: {total_union_deleted:,}")
 
     total_deleted = n_exact_dups + total_union_deleted
     budget_pct = (total_deleted / total_raw) * 100
-    console.print(f" [bold cyan][Summary][/bold cyan] Total Baris Dihapus: {total_deleted:,} ({budget_pct:.2f}% | Sisa Budget: {10.0 - budget_pct:.2f}%).")
+    console.print(f" [bold cyan][Summary][/bold cyan] Total rows purged: {total_deleted:,} ({budget_pct:.2f}% of raw | Remaining budget: {10.0 - budget_pct:.2f}%).")
 
     df_clean = df[~union_delete_mask].copy()
-    console.print(f" [bold green][OK][/bold green] Baris Retained Siap Olah: {len(df_clean):,}")
+    console.print(f" [bold green][OK][/bold green] Retained active rows: {len(df_clean):,}")
 
     # =========================================================================
     # STAGE 3: CORRECTION STEPS (B.3)
@@ -92,7 +101,7 @@ def execute_pipeline():
     inv_min_dates = df_clean.groupby('Invoice')['InvoiceDate'].transform('min')
     multi_ts_invoices = (df_clean.groupby('Invoice')['InvoiceDate'].nunique() > 1).sum()
     df_clean['InvoiceDate'] = inv_min_dates
-    console.print(f" [bold green][Correction 1][/bold green] Diseragamkan timestamp pada {multi_ts_invoices} multi-timestamp invoice (menggunakan MIN date).")
+    console.print(f" [bold green][Correction 1][/bold green] Normalized timestamps across {multi_ts_invoices} multi-timestamp invoices via MIN(InvoiceDate).")
 
     # 2. Multi-description StockCode: majority mode
     df_clean['Description'] = df_clean['Description'].astype(str).str.strip().str.upper()
@@ -103,7 +112,7 @@ def execute_pipeline():
         .to_dict()
     )
     df_clean['Description'] = df_clean['StockCode'].map(stock_mode_desc).fillna(df_clean['Description'])
-    console.print(f" [bold green][Correction 2][/bold green] Diseragamkan deskripsi resmi seluruh produk via nilai modus per StockCode.")
+    console.print(f" [bold green][Correction 2][/bold green] Standardized official product descriptions via statistical mode per StockCode.")
 
     # 3. Impute Price == 0 on legitimate items (Quantity > 0)
     valid_prices = df_clean[df_clean['Price'] > 0]
@@ -111,7 +120,7 @@ def execute_pipeline():
     price_zero_mask = (df_clean['Price'] == 0) & (df_clean['Quantity'] > 0)
     n_price_zero = price_zero_mask.sum()
     df_clean.loc[price_zero_mask, 'Price'] = df_clean.loc[price_zero_mask, 'StockCode'].map(stock_avg_price).fillna(0.00).round(2)
-    console.print(f" [bold green][Correction 3][/bold green] Dipulihkan harga pada {n_price_zero:,} baris Price=0 dengan rata-rata StockCode terkait.")
+    console.print(f" [bold green][Correction 3][/bold green] Imputed prices on {n_price_zero:,} legitimate items (Price=0) with respective StockCode mean price.")
 
     # 4. Single Guest Account (customer_id = 0) & Registered Customer majority Country
     df_clean['Customer_ID_Clean'] = df_clean['Customer ID'].fillna(0).astype(int)
@@ -123,7 +132,7 @@ def execute_pipeline():
     )
     cust_majority_country[0] = 'United Kingdom' # Single guest account UK
     df_clean['Customer_Primary_Country'] = df_clean['Customer_ID_Clean'].map(cust_majority_country)
-    console.print(f" [bold green][Correction 4][/bold green] Ditugaskan Single Guest Account (customer_id = 0, UK) & modus negara per customer.")
+    console.print(f" [bold green][Correction 4][/bold green] Assigned Single Guest Account (customer_id = 0, UK) and resolved customer country via mode.")
 
     # 5. Status & Quantity Handling
     is_c_invoice = df_clean['Invoice'].str.startswith('C')
@@ -140,7 +149,7 @@ def execute_pipeline():
 
     # Qty -> ABS for Cancelled as specified in document B.3 #3
     df_clean.loc[is_c_invoice, 'Quantity'] = df_clean.loc[is_c_invoice, 'Quantity'].abs()
-    console.print(f" [bold green][Correction 5][/bold green] Status invoice diklasifikasikan ('Completed', 'Cancelled', 'Loss') & Qty C-prefix -> ABS.")
+    console.print(f" [bold green][Correction 5][/bold green] Partitioned order statuses ('Completed', 'Cancelled', 'Loss') and normalized cancelled quantities to absolute values.")
 
     # =========================================================================
     # STAGE 4: 3NF RELATIONAL DECONSTRUCTION

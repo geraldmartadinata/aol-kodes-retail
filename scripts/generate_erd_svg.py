@@ -118,9 +118,9 @@ def generate_svg():
         <line x1="0" y1="158" x2="310" y2="158" stroke="#e2e8f0" stroke-width="1" />
 
         <!-- Footer / 3NF Note -->
-        <text x="16" y="185" font-family="'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="500" fill="#64748b">• 5,924 Registered | 15 Regional Guests</text>
-        <text x="16" y="200" font-family="'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="500" fill="#64748b">• Primary residence via majority purchase history</text>
-        <text x="16" y="214" font-family="'Segoe UI', Roboto, sans-serif" font-size="10.5" font-style="italic" fill="#0284c7">→ Dates derived via view_customer_rfm</text>
+        <text x="16" y="185" font-family="'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="500" fill="#64748b">• 5,861 Customers (5,860 Registered, 1 Guest)</text>
+        <text x="16" y="200" font-family="'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="500" fill="#64748b">• Single Guest Account (customer_id = 0, UK)</text>
+        <text x="16" y="214" font-family="'Segoe UI', Roboto, sans-serif" font-size="10.5" font-style="italic" fill="#0284c7">• Dynamic RFM calculated via view_customer_rfm</text>
     </g>
 
 
@@ -171,9 +171,9 @@ def generate_svg():
         <line x1="0" y1="234" x2="340" y2="234" stroke="#e2e8f0" stroke-width="1" />
 
         <!-- Footer / Metadata -->
-        <text x="16" y="256" font-family="'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="500" fill="#64748b">• 52,961 Invoices (41,384 Completed, 8,204 Cancelled, 3,373 Loss)</text>
-        <text x="16" y="271" font-family="'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="500" fill="#64748b">• Unified to MIN(InvoiceDate) per invoice</text>
-        <text x="16" y="284" font-family="'Segoe UI', Roboto, sans-serif" font-size="10.5" font-style="italic" fill="#6366f1">• Captures shipping/destination country directly</text>
+        <text x="16" y="256" font-family="'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="500" fill="#64748b">• 47,164 Invoices (39,117 Completed, 7,308 Cancelled, 739 Loss)</text>
+        <text x="16" y="271" font-family="'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="500" fill="#64748b">• Unified timestamp via MIN(InvoiceDate)</text>
+        <text x="16" y="284" font-family="'Segoe UI', Roboto, sans-serif" font-size="10.5" font-style="italic" fill="#6366f1">• Captures destination country per transaction</text>
     </g>
 
 
@@ -226,7 +226,7 @@ def generate_svg():
         <line x1="0" y1="234" x2="340" y2="234" stroke="#e2e8f0" stroke-width="1" />
 
         <!-- Footer / Metadata -->
-        <text x="16" y="254" font-family="'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="500" fill="#64748b">• 1,014,425 Active Transactions (Zero Orphan Keys)</text>
+        <text x="16" y="254" font-family="'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="500" fill="#64748b">• 1,001,471 Active Transactions (Zero Orphan Keys)</text>
         <text x="16" y="268" font-family="'Segoe UI', Roboto, sans-serif" font-size="10.5" font-style="italic" fill="#0d9488">• Locks billed price at sale time (Preserves 3NF)</text>
     </g>
 
@@ -264,8 +264,8 @@ def generate_svg():
         <line x1="0" y1="158" x2="340" y2="158" stroke="#e2e8f0" stroke-width="1" />
 
         <!-- Footer / Metadata -->
-        <text x="16" y="185" font-family="'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="500" fill="#64748b">• 5,130 Distinct Product SKUs</text>
-        <text x="16" y="200" font-family="'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="500" fill="#64748b">• Clean modal descriptions &amp; standard reference prices</text>
+        <text x="16" y="185" font-family="'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="500" fill="#64748b">• 4,751 Catalog SKUs</text>
+        <text x="16" y="200" font-family="'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="500" fill="#64748b">• Modal descriptions and standard reference prices</text>
         <text x="16" y="214" font-family="'Segoe UI', Roboto, sans-serif" font-size="10.5" font-style="italic" fill="#059669">• Target for Query 1 Price Adjustments (+8%)</text>
     </g>
 
@@ -303,7 +303,7 @@ def generate_svg():
         <line x1="0" y1="158" x2="340" y2="158" stroke="#e2e8f0" stroke-width="1" />
 
         <!-- Footer / Metadata -->
-        <text x="16" y="185" font-family="'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="500" fill="#64748b">• 5,130 Tracked Warehouse Records</text>
+        <text x="16" y="185" font-family="'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="500" fill="#64748b">• 4,751 Tracked Warehouse Records</text>
         <text x="16" y="200" font-family="'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="500" fill="#64748b">• Auto-updated via trg_update_inventory (Phase 4)</text>
         <text x="16" y="214" font-family="'Segoe UI', Roboto, sans-serif" font-size="10.5" font-style="italic" fill="#d97706">• Decrements on sale (+qty), increments on return (-qty)</text>
     </g>
@@ -346,6 +346,16 @@ def generate_svg():
     svg_path = docs_dir / "erd.svg"
     svg_path.write_text(svg_content, encoding="utf-8")
     print(f"Generated clean SVG at: {svg_path.resolve()}")
+
+    png_path = docs_dir / "erd.png"
+    try:
+        import resvg_py
+        png_bytes = resvg_py.svg_to_bytes(svg_content)
+        png_path.write_bytes(png_bytes)
+        print(f"Generated clean PNG at: {png_path.resolve()}")
+    except Exception as e:
+        print(f"Note: PNG generation skipped ({e}). SVG remains available.")
+
     return svg_path
 
 if __name__ == "__main__":

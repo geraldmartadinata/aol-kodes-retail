@@ -1,233 +1,173 @@
-# KoDes Retail — Data Cleansing, 3NF Normalization & Database Documentation
+# KoDes Retail Data Cleansing and ETL Pipeline Documentation
 
-**Dokumen Acuan:** *Data Alteration Log (Revisi Final)*  
-**Workspace:** `aol-kodes-retail`  
-**Target RDBMS:** PostgreSQL / MySQL 8.0+ / SQLite (`data/retail.db`)  
-**Status Pipeline:** ✅ 100% Selesai & Terverifikasi (Zero-Null & ACID Referential Integrity Valid)
+This technical log documents the data cleaning, imputation, and relational normalization pipeline executed on the KoDes Retail transaction dataset.
 
----
-
-## 1. Ringkasan Eksekutif & Arsitektur Data
-
-Berdasarkan revisi final, perancangan skema data menerapkan pemisahan ketat antara **DELETION** (penghapusan baris dengan batas toleransi/budget maksimal 10%) dan **CORRECTION** (resolusi, pemulihan harga, standarisasi, dan labeling transaksi).
-
-### 1.1 Entitas Relasional 3NF (Third Normal Form)
-
-```text
-[CUSTOMER] (1) <────── (N) [INVOICE] (1) <────── (N) [INVOICE_LINE]
-customer_id (PK)          invoice_no (PK)          line_id (PK)
-customer_type             invoice_date             invoice_no (FK)
-country                   customer_id (FK)         stock_code (FK)
-                          country                  quantity
-                          status                   unit_price_at_sale
-                                                           │
-[INVENTORY] (1) <────── (1) [PRODUCT] (1) <────────────────┘
-stock_code (PK/FK)        stock_code (PK)
-stock_level               description
-last_updated              current_unit_price
-```
+The pipeline enforces a strict separation between row deletions (governed by a 10% maximum deletion budget) and in-place data corrections. All operations are deterministic, vectorized via Pandas, and produce normalized Third Normal Form (3NF) relational tables with zero null values and complete referential integrity.
 
 ---
 
-## 2. Catatan Khusus: Rekonsiliasi Jumlah Baris Mentah (Excel Ceiling vs CSV)
+## 1. Pipeline Overview and Architecture
 
-> [!IMPORTANT]
-> **Temuan Teknis untuk Konsultasi Kelas DB:**
-> * Dokumen teman mencatat data awal sebanyak **1.067.371 baris** (berasal dari dataset komplit Online Retail II yang biasanya terdiri dari 2 sheet: 2009–2010 dan 2010–2011).
-> * File spreadsheet tunggal `data/raw/online_retail_data.xlsx` memiliki tepat **1.048.575 baris data (+ 1 baris header = 1.048.576 baris)**.
-> * Angka **1.048.576** adalah batas maksimal fisik (*hard row limit*) satu lembar kerja Microsoft Excel ($2^{20}$). Baris selisih (~18.796 baris) terpotong saat dataset digabung/diekspor ke satu sheet Excel `.xlsx`.
-> * Seluruh rasio persentase penghapusan (4,49% vs 4,44%), jumlah unik admin StockCode, dan distribusi status terbukti konsisten dan proporsional.
+The source dataset consists of historical transactions recorded between 2009 and 2011. In its raw form, the data is unnormalized, containing mixed timestamp granularities, inconsistent product descriptions for identical SKUs, zero-price anomalies, unauthenticated guest checkouts, and non-merchandise administrative entries.
+
+The ETL pipeline resolves these issues across three sequential stages:
+1. Deletion Budget Execution: Prunes unrecoverable administrative entries, blank descriptions, non-UK anonymous records, and exact row duplicates while remaining within the 10% budget constraint.
+2. Data Correction and Imputation: Resolves multi-timestamp orders, standardizes product titles, imputes missing catalog prices, assigns a unified guest account, and classifies order lifecycle statuses.
+3. 3NF Relational Deconstruction: Normalizes clean transactions into five relational entities: customer, product, inventory, invoice, and invoice_line.
 
 ---
 
-## 3. Log Alterasi Data (Deletion & Correction Audit)
+## 2. Raw Dataset Dimensions and Excel Row Ceiling
 
-### 3.1 Ringkasan Deletion Budget (Maksimal 10%)
+A key finding during initial profiling relates to the total row count of the source spreadsheet:
 
-| Tahap | Kategori Penghapusan | Baris Dihapus | % Terhadap Raw | Sisa Budget | Justifikasi |
+* The reference Online Retail II dataset historically contains 1,067,371 rows when distributed across two Excel sheets (2009-2010 and 2010-2011).
+* The provided single-sheet file (`data/raw/online_retail_data.xlsx`) contains exactly 1,048,575 data records plus 1 header row, totaling 1,048,576 rows.
+* 1,048,576 rows represents the hard physical row limit ($2^{20}$) of a Microsoft Excel (.xlsx) worksheet. The remaining rows (~18,796 lines) were truncated during the initial file export to a single Excel sheet.
+
+All deletion budget calculations, union operations, and relational integrity ratios scale consistently and proportionally on this complete single-sheet dataset.
+
+---
+
+## 3. Data Alteration Audit Log
+
+### 3.1 Deletion Budget Summary (Ceiling: 10.0%)
+
+Row deletions are strictly restricted to unrecoverable or non-merchandise records. The table below outlines row reductions relative to the raw count of 1,048,575 rows:
+
+| Step | Alteration Category | Rows Purged | Percentage of Raw | Remaining Budget | Engineering Rationale |
 |:---|:---|:---:|:---:|:---:|:---|
-| **Step 1** | Exact Duplicate Rows (8 kolom identik) | 34.150 | 3,26% | 6,74% | Redundansi murni / tidak ada informasi baru |
-| **Step 2–4** | Union Non-Produk + Deskripsi Kosong + Customer Non-UK Kosong | 12.954 | 1,23% | 5,51% | Bukan transaksi retail fisik atau data tidak dapat diselamatkan |
-| **TOTAL** | **Akumulasi Terhapus (Union tanpa double-count)** | **47.104** | **4,49%** | **5,51%** | **Budget aman (jauh di bawah batas 10%)** |
+| 1 | Exact duplicate rows (identical across all 8 columns) | 34,150 | 3.26% | 6.74% | Eliminates identical recorded lines caused by transmission or logging duplication. |
+| 2-4 | Union of Admin SKUs, blank descriptions, and non-UK blank Customer IDs | 12,954 | 1.23% | 5.51% | Purges non-physical postal/banking fees and unidentifiable international records without double-counting 90 overlapping rows. |
+| Total | Net rows purged | 47,104 | 4.49% | 5.51% | Fully compliant with the 10% deletion constraint. |
 
-*Rincian Gross Step 2–4 sebelum reduksi overlap (90 baris irisan):*
-* *StockCode Admin (`POST`, `DOT`, `M`, `C2`, `D`, `BANK CHARGES`, dll.):* 5.834 baris.
-* *Description Kosong Total:* 4.265 baris.
-* *Customer ID Kosong Non-UK:* 2.945 baris.
+Gross category breakdown for Steps 2 to 4 prior to union overlap deduplication:
+* Administrative StockCodes (`POST`, `DOT`, `M`, `C2`, `D`, `BANK CHARGES`, etc.): 5,834 rows.
+* Blank or empty descriptions: 4,265 rows.
+* Non-UK missing Customer IDs: 2,945 rows.
+* Multi-category overlap: 90 rows belonged to more than one deletion category.
 
----
-
-### 3.2 Langkah Pemulihan & Koreksi Data (Correction Steps)
-
-1. **Resolusi Multi-Timestamp:**  
-   83 invoice yang memiliki lebih dari satu timestamp diseragamkan dengan mengambil nilai `MIN(InvoiceDate)` per invoice.
-2. **Standarisasi Deskripsi Produk:**  
-   Deskripsi resmi tiap `StockCode` diseragamkan menggunakan nilai modus (nama yang paling sering muncul).
-3. **Pemulihan Harga `Price = 0`:**  
-   Pada transaksi barang asli (`Quantity > 0`) dengan `Price = 0` (953 baris), nilai harga dipulihkan menggunakan rata-rata harga `StockCode` terkait.
-4. **Single Guest Account Strategy:**  
-   Seluruh transaksi anonim UK dipertahankan dan ditugaskan ke satu akun sintetis:  
-   * `customer_id = 0`, `customer_type = 'Guest'`, `country = 'United Kingdom'`.  
-   * Integritas referensial terjaga sehingga kolom `INVOICE.customer_id` berstatus `NOT NULL`.
-5. **Klasifikasi Status Transaksi & Penyesuaian Kuantitas:**  
-   * Invoice berawalan huruf `'C'` $\rightarrow$ `status = 'Cancelled'`, kuantitas diubah menjadi absolut positif (`Qty -> ABS`).  
-   * Transaksi kuantitas negatif non-C $\rightarrow$ `status = 'Loss'` (write-off inventaris/kerusakan gudang).  
-   * Transaksi normal $\rightarrow$ `status = 'Completed'`.  
-   * Status per invoice ditetapkan menggunakan aturan mayoritas (*majority mode*).
+Retained transaction rows ready for normalization: 1,001,471 records (95.51% of raw data).
 
 ---
 
-## 4. Statistik Akhir Tabel Produksi
+### 3.2 Correction and Imputation Pipeline
 
-| Tabel | Primary Key | Jumlah Baris (Record) | Keterangan |
+Instead of purging records with partial anomalies, the pipeline applies deterministic data imputation and standardization:
+
+1. Canonical Timestamp Resolution:  
+   83 invoice numbers contained multiple conflicting timestamps across their item lines. The pipeline resolves each invoice to a single authoritative timestamp using the minimum timestamp observed (`MIN(InvoiceDate)`).
+
+2. Product Description Standardization:  
+   SKUs with drifting or variant descriptions are standardized to the statistical mode (the most frequently recorded description) for each respective `StockCode`.
+
+3. Zero-Price Imputation:  
+   953 lines represented authentic physical retail transactions (`Quantity > 0`) but recorded a unit price of 0.00. The pipeline imputes these prices using the arithmetic mean price of the corresponding `StockCode` across valid positive sales.
+
+4. Single Guest Account Architecture:  
+   Anonymous transactions originating from the United Kingdom are assigned to a unified synthetic guest record:
+   * `customer_id = 0`, `customer_type = 'Guest'`, `country = 'United Kingdom'`.
+   * This design satisfies referential integrity constraints, ensuring that `invoice.customer_id` remains `NOT NULL` while retaining more than 2.8 million GBP in authentic commercial sales volume.
+
+5. Order Lifecycle Status and Quantity Handling:  
+   * Invoices prefixed with 'C' indicate cancellations. The order status is set to `'Cancelled'`, and quantities are normalized to absolute positive values (`Quantity = ABS(Quantity)`).
+   * Non-prefixed lines with negative quantities represent damaged stock, write-offs, or warehouse adjustments. Their status is set to `'Loss'`.
+   * Standard sales transactions with positive quantities are assigned the status `'Completed'`.
+   * The final invoice header status is determined through a majority mode vote across its constituent lines.
+
+---
+
+## 4. Final Relational Table Statistics
+
+The normalized output tables contain the following record counts in production:
+
+| Table | Primary Key | Total Records | Role and Description |
 |:---|:---|:---:|:---|
-| `customer` | `customer_id` | **5.861** | 5.860 Registered + 1 Guest (`id=0`) |
-| `product` | `stock_code` | **4.751** | Master katalog produk terdaftar |
-| `inventory` | `stock_code` | **4.751** | Ledger pelacak stok fisik |
-| `invoice` | `invoice_no` | **47.164** | Header transaksi resmi |
-| `invoice_line` | `line_id` | **1.001.471** | Baris detail transaksi aktif |
+| customer | customer_id | 5,861 | Master customer directory (5,860 registered members + 1 guest account). |
+| product | stock_code | 4,751 | Official SKU merchandise catalog with modal descriptions. |
+| inventory | stock_code | 4,751 | Warehouse stock tracker (1:1 with product). |
+| invoice | invoice_no | 47,164 | Order transaction headers with canonical dates and statuses. |
+| invoice_line | line_id | 1,001,471 | Detailed atomic transaction line items. |
 
-### Distribusi Status Invoice:
-* **Completed:** 39.117 invoice (82,9%)
-* **Cancelled:** 7.308 invoice (15,5%)
-* **Loss:** 739 invoice (1,6%)
+### Invoice Status Distribution:
+* Completed: 39,117 invoices (82.9%)
+* Cancelled: 7,308 invoices (15.5%)
+* Loss: 739 invoices (1.6%)
 
 ---
 
-## 5. Cuplikan Kode Penting (Python ETL Pipeline)
+## 5. Implementation Code Highlights
 
-### 5.1 Logika Deletion Budget & Union (Vectorized Pandas)
+### 5.1 Deletion Budget Union Logic (Pandas Vectorized)
 
 ```python
-# 1. Exact duplicates
+# Step 1: Remove exact row duplicates across all columns
 df = df_raw.drop_duplicates().copy()
 
-# 2. Identifikasi baris admin, blank deskripsi, dan non-UK blank customer
-admin_stockcodes = {'POST', 'DOT', 'M', 'C2', 'D', 'S', 'BANK CHARGES', 'ADJUST', 'AMAZONFEE', ...}
+# Step 2-4: Identify administrative SKUs, missing descriptions, and non-UK anonymous checkouts
+admin_stockcodes = {
+    'POST', 'DOT', 'M', 'C2', 'D', 'S', 'BANK CHARGES', 'ADJUST', 
+    'AMAZONFEE', 'DCGS0058', 'DCGS0068', 'DCGS0069', 'DCGS0070', 'DCGS0076',
+    'DCGSSGIRL', 'DCGSSBOY', 'PADS', 'TEST', 'B', 'CRUK'
+}
 is_admin = df['StockCode'].isin(admin_stockcodes) | df['StockCode'].str.startswith('GIFT_0001_')
 is_missing_desc = df['Description'].isna() | (df['Description'].astype(str).str.strip() == '')
 is_non_uk_missing_cust = df['Customer ID'].isna() & (df['Country'] != 'United Kingdom')
 
-# Union tanpa double count
+# Union mask without double-counting overlap
 union_delete_mask = is_admin | is_missing_desc | is_non_uk_missing_cust
 df_clean = df[~union_delete_mask].copy()
 ```
 
-### 5.2 Single Guest Account & Imputasi Harga
+### 5.2 Single Guest Account and Zero-Price Imputation
 
 ```python
-# Single Guest Account (customer_id = 0)
+# Map anonymous UK transactions to single guest ID 0
 df_clean['Customer_ID_Clean'] = df_clean['Customer ID'].fillna(0).astype(int)
 
-# Imputasi Price=0 untuk barang asli (Quantity > 0)
+# Impute zero prices on legitimate items using SKU mean price
 valid_prices = df_clean[df_clean['Price'] > 0]
 stock_avg_price = valid_prices.groupby('StockCode')['Price'].mean().to_dict()
 price_zero_mask = (df_clean['Price'] == 0) & (df_clean['Quantity'] > 0)
-df_clean.loc[price_zero_mask, 'Price'] = df_clean.loc[price_zero_mask, 'StockCode'].map(stock_avg_price).fillna(0.00).round(2)
+df_clean.loc[price_zero_mask, 'Price'] = (
+    df_clean.loc[price_zero_mask, 'StockCode']
+    .map(stock_avg_price)
+    .fillna(0.00)
+    .round(2)
+)
 ```
 
 ---
 
-## 6. Cuplikan Query SQL & Skema Database
+## 6. Analytical Query Validation
 
-### 6.1 DDL Skema 3NF (`sql/schema.sql`)
+The local SQLite database (`data/retail.db`, 68.14 MB) was evaluated against production reporting queries to confirm data cleanliness and query performance:
 
-```sql
-CREATE TABLE customer (
-    customer_id     INT             NOT NULL,
-    customer_type   VARCHAR(20)     NOT NULL,
-    country         VARCHAR(60)     NOT NULL,
-    CONSTRAINT pk_customer PRIMARY KEY (customer_id),
-    CONSTRAINT chk_customer_type CHECK (customer_type IN ('Registered', 'Guest'))
-);
+### Query 3: Top 5 Regional Sales Breakdown (Completed Transactions Only)
 
-CREATE TABLE product (
-    stock_code          VARCHAR(30)     NOT NULL,
-    description         VARCHAR(255)    NOT NULL,
-    current_unit_price  DECIMAL(10, 2)  NOT NULL DEFAULT 0.00,
-    CONSTRAINT pk_product PRIMARY KEY (stock_code),
-    CONSTRAINT chk_product_price CHECK (current_unit_price >= 0.00)
-);
-
-CREATE TABLE invoice (
-    invoice_no      VARCHAR(20)     NOT NULL,
-    invoice_date    TIMESTAMP       NOT NULL,
-    customer_id     INT             NOT NULL,
-    country         VARCHAR(60)     NOT NULL,
-    status          VARCHAR(20)     NOT NULL,
-    CONSTRAINT pk_invoice PRIMARY KEY (invoice_no),
-    CONSTRAINT fk_invoice_customer FOREIGN KEY (customer_id)
-        REFERENCES customer (customer_id) ON UPDATE CASCADE ON DELETE RESTRICT,
-    CONSTRAINT chk_invoice_status CHECK (status IN ('Completed', 'Cancelled', 'Loss'))
-);
-
-CREATE TABLE invoice_line (
-    line_id             BIGINT          NOT NULL,
-    invoice_no          VARCHAR(20)     NOT NULL,
-    stock_code          VARCHAR(30)     NOT NULL,
-    quantity            INT             NOT NULL,
-    unit_price_at_sale  DECIMAL(10, 2)  NOT NULL DEFAULT 0.00,
-    CONSTRAINT pk_invoice_line PRIMARY KEY (line_id),
-    CONSTRAINT fk_line_invoice FOREIGN KEY (invoice_no)
-        REFERENCES invoice (invoice_no) ON UPDATE CASCADE ON DELETE CASCADE,
-    CONSTRAINT fk_line_product FOREIGN KEY (stock_code)
-        REFERENCES product (stock_code) ON UPDATE CASCADE ON DELETE RESTRICT
-);
-```
-
-### 6.2 View Analitik RFM Dinamis (`view_customer_rfm`)
-
-```sql
-CREATE OR REPLACE VIEW view_customer_rfm AS
-SELECT 
-    c.customer_id,
-    c.customer_type,
-    c.country,
-    MIN(i.invoice_date)                                 AS first_purchase_date,
-    MAX(i.invoice_date)                                 AS last_purchase_date,
-    COUNT(DISTINCT i.invoice_no)                        AS total_completed_invoices,
-    COALESCE(SUM(l.quantity * l.unit_price_at_sale), 0) AS total_lifetime_spend
-FROM customer c
-LEFT JOIN invoice i 
-    ON c.customer_id = i.customer_id 
-   AND i.status = 'Completed'
-LEFT JOIN invoice_line l 
-    ON i.invoice_no = l.invoice_no
-GROUP BY 
-    c.customer_id, 
-    c.customer_type, 
-    c.country;
-```
-
----
-
-## 7. Hasil Uji Coba Query Analitis pada Database Aktif (`data/retail.db`)
-
-Database SQLite aktif di `data/retail.db` (68,14 MB) telah diuji dan menghasilkan metrik:
-
-### Query 3: Top 5 Regional Sales Breakdown (Completed Only)
-| Negara | Completed Invoices | Total Revenue | Avg Line Value |
+| Country | Completed Invoices | Total Sales Revenue | Average Line Value |
 |:---|---:|---:|---:|
-| **United Kingdom** | 35.938 | **$17.352.685,15** | $19,12 |
-| **EIRE** | 521 | **$581.078,21** | $38,57 |
-| **Netherlands** | 214 | **$539.077,55** | $110,02 |
-| **Germany** | 739 | **$377.027,70** | $24,28 |
-| **France** | 578 | **$305.158,88** | $23,81 |
+| United Kingdom | 35,938 | $17,352,685.15 | $19.12 |
+| EIRE | 521 | $581,078.21 | $38.57 |
+| Netherlands | 214 | $539,077.55 | $110.02 |
+| Germany | 739 | $377,027.70 | $24.28 |
+| France | 578 | $305,158.88 | $23.81 |
 
-### Query 4: Top 5 VIP High-Spenders (Registered Only)
-| Customer ID | Tipe | Negara | Total Spend |
+### Query 4: Top 5 VIP High-Spenders (Registered Accounts Only)
+
+| Customer ID | Account Type | Country | Calculated Total Spend |
 |:---|:---|:---|---:|
-| **18102** | Registered | United Kingdom | **$569.501,50** |
-| **14646** | Registered | Netherlands | **$516.055,66** |
-| **14156** | Registered | EIRE | **$303.069,88** |
-| **14911** | Registered | EIRE | **$266.704,92** |
-| **17450** | Registered | United Kingdom | **$245.788,65** |
+| 18102 | Registered | United Kingdom | $569,501.50 |
+| 14646 | Registered | Netherlands | $516,055.66 |
+| 14156 | Registered | EIRE | $303,069.88 |
+| 14911 | Registered | EIRE | $266,704.92 |
+| 17450 | Registered | United Kingdom | $245,788.65 |
 
 ---
 
-## 8. Panduan Akses Database Langsung
+## 7. Database Verification Guidelines
 
-1. **Akses SQLite Instan:**  
-   Buka file `data/retail.db` langsung di DBeaver, DataGrip, DB Browser for SQLite, atau VSCode SQLite Viewer.
-2. **Ingesti ke PostgreSQL Lokal/Server Kampus:**  
-   Gunakan perintah `\copy` dari `sql/schema.sql` untuk mengimpor file CSV di folder `data/processed/` ke PostgreSQL.
+1. SQLite Inspection:  
+   Open `data/retail.db` directly using any SQLite-compatible database client (DBeaver, DataGrip, or VSCode SQLite Viewer) to query physical tables and `view_customer_rfm`.
+2. PostgreSQL Cloud Ingestion:  
+   Deploy DDL statements from `sql/schema.sql` to initialize tables, constraints, and views on PostgreSQL. Then stream processed CSVs from `data/processed/` using the native COPY command or via `scripts/sync_supabase.py --push`.

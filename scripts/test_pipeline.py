@@ -1,3 +1,12 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "pandas>=2.2.0",
+#     "openpyxl>=3.1.2",
+#     "numpy>=1.26.0",
+# ]
+# ///
+
 import time
 from pathlib import Path
 import pandas as pd
