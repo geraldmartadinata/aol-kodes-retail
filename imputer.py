@@ -8,16 +8,6 @@
 # ]
 # ///
 
-"""
-================================================================================
-  CSV IMPUTER & 3NF NORMALIZER ENGINE
-  High-Throughput Data Cleansing & Relational Normalization CLI
-  Author & Copyright: (c) 2026 Gerald Martadinata
-  Repository: https://github.com/geraldmartadinata/csv-imputer
-  License: MIT
-================================================================================
-"""
-
 import sys
 import os
 import time
@@ -25,7 +15,6 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 
-# Enforce UTF-8 on Windows Consoles
 if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -50,7 +39,6 @@ BANNER = r"""
 [bold cyan] \____|____/  \_/    |___|_| |_| |_| .__/|_|\__\___|_|    [/bold cyan]
 [bold cyan]                                   |_|  & 3NF Normalizer  [/bold cyan]
 [dim] High-Performance Data Engineering & Quality Assurance CLI • v1.3.0[/dim]
-[dim] Author & Copyright: (c) 2026 Gerald Martadinata. Released under MIT License.[/dim]
 """
 
 def print_header():
@@ -66,9 +54,6 @@ def print_header():
     console.print(info_panel)
     console.print()
 
-# ==============================================================================
-# FEATURE 1: Pre-Run Dataset Inspection & Pattern Recommendation Engine
-# ==============================================================================
 def inspect_raw_dataset(input_file: Path):
     console.print(Panel(f"[bold white]Inspecting File:[/bold white] [cyan]{input_file}[/cyan]", title="[bold cyan]Phase 1: Pre-Run Profiling & Diagnostic Engine[/bold cyan]", box=box.ROUNDED))
     
@@ -124,7 +109,6 @@ def inspect_raw_dataset(input_file: Path):
         )
     console.print(profile_table)
     
-    # Recommendations Table
     recom_table = Table(title="[bold yellow]Automated Anomaly & Pattern Diagnostics[/bold yellow]", box=box.ROUNDED)
     recom_table.add_column("Anomaly / Pattern", style="cyan")
     recom_table.add_column("Observed Metric", style="white")
@@ -168,9 +152,6 @@ def inspect_raw_dataset(input_file: Path):
     console.print(recom_table)
     return df
 
-# ==============================================================================
-# FEATURE 2: High-Speed 3NF Vectorized Cleansing & Normalization
-# ==============================================================================
 def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 90000):
     start_time = time.time()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -178,7 +159,6 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
     
     console.print(Panel(f"[bold white]Source File:[/bold white] [cyan]{input_file}[/cyan]\n[bold white]Destination Folder:[/bold white] [cyan]{output_dir}[/cyan]", title="[bold cyan]Phase 2: Hybrid 3NF Normalization Pipeline[/bold cyan]", box=box.ROUNDED))
     
-    # Step 1: Ingestion
     with Progress(
         SpinnerColumn("dots", style="cyan"),
         TextColumn("[bold cyan]{task.description}[/bold cyan]"),
@@ -208,7 +188,6 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
         
     console.print(f" [bold green][OK][/bold green] Ingested [bold yellow]{initial_raw_rows:,}[/bold yellow] raw records.")
 
-    # Step 2: Deduplication
     with Progress(
         SpinnerColumn("dots", style="cyan"),
         TextColumn("[bold cyan]{task.description}[/bold cyan]"),
@@ -222,7 +201,6 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
         progress.update(dedup_task, completed=100)
     console.print(f" [bold green][OK][/bold green] Purged [bold yellow]{exact_dups:,}[/bold yellow] exact duplicates ({len(df):,} clean transaction rows remain).")
 
-    # Step 2.5: Union Deletion Steps (B.1 & B.2 - Deletion Budget ≤ 10%)
     df['Invoice'] = df['Invoice'].astype(str).str.strip()
     df['StockCode'] = df['StockCode'].astype(str).str.strip().str.upper()
     df['Country'] = df['Country'].astype(str).str.strip()
@@ -241,7 +219,6 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
     df = df[~union_delete_mask].copy()
     console.print(f" [bold green][OK][/bold green] Purged [bold yellow]{total_union_deleted:,}[/bold yellow] rows via union deletion (Admin SKU, blank Desc, non-UK blank Customer ID).")
 
-    # Step 3: Diagnostic Resolution & Smart Imputation
     with Progress(
         SpinnerColumn("dots", style="cyan"),
         TextColumn("[bold cyan]{task.description}[/bold cyan]"),
@@ -251,13 +228,11 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
     ) as progress:
         impute_task = progress.add_task("[3/5] Resolving timestamps, countries & SKU descriptions...", total=100)
         
-        # A. Resolve multi-timestamp invoices -> Take MIN(InvoiceDate)
         df['InvoiceDate'] = pd.to_datetime(df['InvoiceDate'])
         inv_min_dates = df.groupby('Invoice')['InvoiceDate'].transform('min')
         df['InvoiceDate'] = inv_min_dates
         progress.update(impute_task, completed=25)
         
-        # B. Standardize descriptions: Mode per StockCode
         df['Description'] = df['Description'].astype(str).str.strip().str.upper()
         stock_mode_desc = (
             df[df['Description'].str.len() > 1]
@@ -268,14 +243,12 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
         df['Description'] = df['StockCode'].map(stock_mode_desc).fillna(df['Description'])
         progress.update(impute_task, completed=50)
 
-        # C. Impute Price == 0 for legitimate items (Quantity > 0)
         valid_prices = df[df['Price'] > 0]
         stock_avg_price = valid_prices.groupby('StockCode')['Price'].mean().to_dict()
         price_zero_mask = (df['Price'] == 0) & (df['Quantity'] > 0)
         df.loc[price_zero_mask, 'Price'] = df.loc[price_zero_mask, 'StockCode'].map(stock_avg_price).fillna(0.00).round(2)
         progress.update(impute_task, completed=75)
         
-        # D. Single Guest Account (customer_id = 0, UK) & Majority Country per Customer
         df['Customer_ID_Clean'] = df['Customer ID'].fillna(0).astype(int)
         cust_majority_country = (
             df[df['Customer_ID_Clean'] > 0]
@@ -291,7 +264,6 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
     console.print(f" [bold green][OK][/bold green] Standardized descriptions across SKUs and recovered Price=0 rows.")
     console.print(f" [bold green][OK][/bold green] Allocated all anonymous UK checkouts to Single Guest Account (customer_id = 0).")
 
-    # Step 4: 3NF Relational Deconstruction
     with Progress(
         SpinnerColumn("dots", style="cyan"),
         TextColumn("[bold cyan]{task.description}[/bold cyan]"),
@@ -301,7 +273,6 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
     ) as progress:
         deconstruct_task = progress.add_task("[4/5] Deconstructing into 3NF relational schema...", total=100)
         
-        # 1. Table: CUSTOMER
         cust_df = df[['Customer_ID_Clean', 'Customer_Primary_Country']].drop_duplicates(subset=['Customer_ID_Clean']).copy()
         cust_df.rename(columns={'Customer_ID_Clean': 'customer_id', 'Customer_Primary_Country': 'country'}, inplace=True)
         cust_df['customer_type'] = cust_df['customer_id'].apply(
@@ -310,7 +281,6 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
         cust_df.sort_values(by='customer_id', inplace=True)
         progress.update(deconstruct_task, completed=25)
 
-        # 2. Table: PRODUCT
         valid_prices = df[df['Price'] > 0]
         stock_to_median_price = valid_prices.groupby('StockCode')['Price'].median().to_dict()
         
@@ -322,13 +292,11 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
         prod_df = prod_base.sort_values(by='stock_code')
         progress.update(deconstruct_task, completed=50)
 
-        # 3. Table: INVENTORY
         inventory_df = prod_df[['stock_code']].copy()
         inventory_df['stock_level'] = 1000
         inventory_df['last_updated'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         progress.update(deconstruct_task, completed=65)
 
-        # 4. Table: INVOICE
         is_c_invoice = df['Invoice'].str.startswith('C')
         is_loss_line = (~is_c_invoice) & (df['Quantity'] < 0)
 
@@ -337,7 +305,6 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
         line_status[is_loss_line] = 'Loss'
         df['Line_Status'] = line_status
 
-        # Invoice-level majority status rule
         inv_majority_status = df.groupby('Invoice')['Line_Status'].agg(lambda s: s.mode()[0]).to_dict()
         
         inv_base = df[['Invoice', 'InvoiceDate', 'Customer_ID_Clean', 'Country']].drop_duplicates(subset=['Invoice']).copy()
@@ -351,10 +318,8 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
         inv_df = inv_base.sort_values(by='invoice_date')
         progress.update(deconstruct_task, completed=80)
 
-        # Convert Qty -> ABS for Cancelled as specified in document B.3 #3
         df.loc[is_c_invoice, 'Quantity'] = df.loc[is_c_invoice, 'Quantity'].abs()
 
-        # 5. Table: INVOICE_LINE
         items_df = pd.DataFrame({
             'invoice_no': df['Invoice'],
             'stock_code': df['StockCode'],
@@ -368,7 +333,6 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
 
     console.print(" [bold green][OK][/bold green] Relational deconstruction to 3NF schema completed.")
 
-    # Step 5: Export CSV Files
     with Progress(
         SpinnerColumn("dots", style="cyan"),
         TextColumn("[bold cyan]{task.description}[/bold cyan]"),
@@ -435,9 +399,6 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
     ))
     return output_dir
 
-# ==============================================================================
-# FEATURE 3: Deep Anomaly Audit & Interactive Repair Engine
-# ==============================================================================
 def audit_and_repair_processed(data_dir: Path):
     console.print(Panel(
         f"[bold white]Target Dataset Directory:[/bold white] [cyan]{data_dir}[/cyan]\n"
@@ -454,11 +415,9 @@ def audit_and_repair_processed(data_dir: Path):
         "INVOICE_LINE": data_dir / "invoice_lines.csv",
     }
     
-    # Check legacy filename fallback
     if not files["INVOICE_LINE"].exists() and (data_dir / "invoice_items.csv").exists():
         files["INVOICE_LINE"] = data_dir / "invoice_items.csv"
 
-    # 1. File existence
     dfs = {}
     for name, path in files.items():
         if not path.exists():
@@ -466,7 +425,6 @@ def audit_and_repair_processed(data_dir: Path):
             return False
         dfs[name] = pd.read_csv(path, dtype=str)
 
-    # 2. Null Value Check
     null_table = Table(title="Completeness Audit (Zero-Null Check)", box=box.SIMPLE_HEAVY)
     null_table.add_column("Table", style="cyan")
     null_table.add_column("Column", style="white")
@@ -490,13 +448,11 @@ def audit_and_repair_processed(data_dir: Path):
 
     console.print(null_table)
 
-    # 3. Uniformity Checks
     cust_types = set(dfs["CUSTOMER"]["customer_type"].unique())
     is_cust_uniform = cust_types.issubset({"Registered", "Guest"})
     inv_statuses = set(dfs["INVOICE"]["status"].unique())
     is_inv_uniform = inv_statuses.issubset({"Completed", "Cancelled", "Loss"})
 
-    # 4. Referential Integrity
     ref_table = Table(title="Foreign Key Referential Integrity Constraints", box=box.SIMPLE_HEAVY)
     ref_table.add_column("Constraint", style="cyan")
     ref_table.add_column("Parent Table", style="white")
@@ -526,7 +482,6 @@ def audit_and_repair_processed(data_dir: Path):
     console.print(ref_table)
     total_orphans = orphan_cust + orphan_inv + orphan_prod + orphan_invt
 
-    # 5. Summary & Repair Decision
     if total_nulls == 0 and total_orphans == 0 and is_cust_uniform and is_inv_uniform:
         lines = dfs["INVOICE_LINE"].copy()
         lines["quantity"] = pd.to_numeric(lines["quantity"], errors='coerce').fillna(0)
@@ -591,9 +546,6 @@ def audit_and_repair_processed(data_dir: Path):
             console.print("[yellow]Anomalies left unaddressed as requested.[/yellow]")
             return False
 
-# ==============================================================================
-# PERSISTENT REPL INTERACTIVE MENU
-# ==============================================================================
 def interactive_menu(input_path: Path, output_path: Path, guest_prefix: int):
     while True:
         console.print()
@@ -655,15 +607,12 @@ def interactive_menu(input_path: Path, output_path: Path, guest_prefix: int):
                 console.print(f" [green]✓[/green] Guest prefix updated to: {guest_prefix}")
             console.input("\n[dim]Press [Enter] to return to the Main Menu...[/dim]")
         elif choice in ["6", "q", "exit", "quit"]:
-            console.print(Panel("[bold green]Thank you for using CSV Imputer & 3NF Normalizer Engine!\nAuthor & Copyright: (c) 2026 Gerald Martadinata. Released under MIT License.[/bold green]", box=box.ROUNDED))
+            console.print(Panel("[bold green]Thank you for using CSV Imputer & 3NF Normalizer Engine![/bold green]", box=box.ROUNDED))
             break
         else:
             console.print("[bold red]Invalid option. Please enter a number from 1 to 6.[/bold red]")
             console.input("\n[dim]Press [Enter] to try again...[/dim]")
 
-# ==============================================================================
-# MAIN ENTRYPOINT
-# ==============================================================================
 def main():
     script_dir = Path(__file__).parent.resolve()
     
@@ -681,7 +630,7 @@ def main():
         default_output = script_dir / "output"
 
     parser = argparse.ArgumentParser(
-        description="CSV Imputer & 3NF Normalizer Engine — by Gerald Martadinata"
+        description="CSV Imputer & 3NF Normalizer Engine"
     )
     parser.add_argument("--input", "-i", type=Path, default=default_input, help="Path to raw dataset (.csv/.xlsx)")
     parser.add_argument("--output", "-o", type=Path, default=default_output, help="Destination directory for 3NF tables")
