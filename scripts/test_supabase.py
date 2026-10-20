@@ -111,11 +111,11 @@ def test_phase2_tables(conn):
     cur = conn.cursor()
 
     expected_tables = [
-        ("customer", 5861),
-        ("product", 4751),
-        ("inventory", 4751),
-        ("invoice", 47164),
-        ("invoice_line", 1001471),
+        ("customer", 5877),
+        ("product", 4755),
+        ("inventory", 4755),
+        ("invoice", 47796),
+        ("invoice_line", 1020083),
     ]
 
     t = Table(title="Supabase PostgreSQL: 3NF Tables & Row Counts", box=box.ROUNDED)
@@ -360,7 +360,7 @@ def run_all_tests():
 
         console.print(Panel(
             "[bold green]ALL SUPABASE CLOUD AUDITS PASSED (100% SUCCESS)[/bold green]\n\n"
-            "• Phase 2: All 5 tables contain complete, un-sampled records (1,001,471 active lines).\n"
+            "• Phase 2: All 5 tables contain complete, un-sampled records (1,020,083 active lines).\n"
             "• Phase 2: Dynamic RFM view calculates recency and monetary spend on-demand.\n"
             "• Phase 3: All 5 required analytical queries execute accurately.\n"
             "• Phase 4: Inventory trigger decrements stock in real-time.\n"

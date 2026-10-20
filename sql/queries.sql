@@ -53,6 +53,9 @@ ORDER BY total_sales_revenue DESC;
 -- high spending customers
 SELECT 
     c.customer_id,
+    c.customer_name,
+    c.email,
+    c.phone,
     c.customer_type,
     c.country,
     ROUND(SUM(l.quantity * l.unit_price_at_sale), 2) AS customer_total_spend
@@ -63,7 +66,7 @@ JOIN invoice_line l
     ON i.invoice_no = l.invoice_no
 WHERE i.status = 'Completed'
   AND c.customer_type = 'Registered'
-GROUP BY c.customer_id, c.customer_type, c.country
+GROUP BY c.customer_id, c.customer_name, c.email, c.phone, c.customer_type, c.country
 HAVING SUM(l.quantity * l.unit_price_at_sale) > (
     SELECT AVG(customer_spend)
     FROM (

@@ -97,7 +97,7 @@ def push_to_supabase(url: str):
     # Step 3: Fast Ingestion via COPY
     console.print("\n[bold yellow]Step 3: Fast Streaming CSV Data into Supabase Tables...[/bold yellow]")
     tables = [
-        ("customer", data_dir / "customers.csv", "(customer_id, country, customer_type)"),
+        ("customer", data_dir / "customers.csv", "(customer_id, customer_name, email, phone, customer_type, country)"),
         ("product", data_dir / "products.csv", "(stock_code, description, current_unit_price)"),
         ("inventory", data_dir / "inventory.csv", "(stock_code, stock_level, last_updated)"),
         ("invoice", data_dir / "invoices.csv", "(invoice_no, invoice_date, customer_id, country, status)"),
