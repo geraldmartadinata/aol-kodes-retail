@@ -1,0 +1,101 @@
+-- drop existing tables
+DROP VIEW IF EXISTS view_customer_rfm CASCADE;
+DROP TABLE IF EXISTS invoice_line CASCADE;
+DROP TABLE IF EXISTS invoice CASCADE;
+DROP TABLE IF EXISTS inventory CASCADE;
+DROP TABLE IF EXISTS product CASCADE;
+DROP TABLE IF EXISTS customer CASCADE;
+
+-- customer table
+CREATE TABLE customer (
+    customer_id     INT             NOT NULL,
+    customer_type   VARCHAR(20)     NOT NULL,
+    country         VARCHAR(60)     NOT NULL,
+    CONSTRAINT pk_customer PRIMARY KEY (customer_id),
+    CONSTRAINT chk_customer_type CHECK (customer_type IN ('Registered', 'Guest'))
+);
+
+-- product table
+CREATE TABLE product (
+    stock_code          VARCHAR(30)     NOT NULL,
+    description         VARCHAR(255)    NOT NULL,
+    current_unit_price  DECIMAL(10, 2)  NOT NULL DEFAULT 0.00,
+    CONSTRAINT pk_product PRIMARY KEY (stock_code),
+    CONSTRAINT chk_product_price CHECK (current_unit_price >= 0.00)
+);
+
+-- inventory table
+CREATE TABLE inventory (
+    stock_code      varchar(30)     NOT NULL,
+    stock_level     INT             NOT NULL DEFAULT 1000,
+    last_updated    TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_inventory PRIMARY KEY (stock_code),
+    CONSTRAINT fk_inventory_product FOREIGN KEY (stock_code)
+        REFERENCES product (stock_code)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+);
+
+-- invoice table
+CREATE TABLE invoice (
+    invoice_no      VARCHAR(20)     NOT NULL,
+    invoice_date    TIMESTAMP       NOT NULL,
+    customer_id     INT             NOT NULL,
+    country         VARCHAR(60)     NOT NULL,
+    status          VARCHAR(20)     NOT NULL,
+    CONSTRAINT pk_invoice primary key (invoice_no),
+    CONSTRAINT fk_invoice_customer FOREIGN KEY (customer_id)
+        REFERENCES customer (customer_id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+    CONSTRAINT chk_invoice_status CHECK (status IN ('Completed', 'Cancelled', 'Loss'))
+);
+
+-- invoice line table
+CREATE TABLE invoice_line (
+    line_id             BIGINT          NOT NULL,
+    invoice_no          VARCHAR(20)     NOT NULL,
+    stock_code          VARCHAR(30)     NOT NULL,
+    quantity            INT             NOT NULL,
+    unit_price_at_sale  DECIMAL(10, 2)  NOT NULL DEFAULT 0.00,
+    CONSTRAINT pk_invoice_line PRIMARY KEY (line_id),
+    CONSTRAINT fk_line_invoice FOREIGN KEY (invoice_no)
+        REFERENCES invoice (invoice_no)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT fk_line_product FOREIGN KEY (stock_code)
+        REFERENCES product (stock_code)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+    CONSTRAINT chk_unit_price_at_sale CHECK (unit_price_at_sale >= 0.00)
+);
+
+-- indexes
+CREATE INDEX idx_invoice_customer ON invoice (customer_id);
+CREATE INDEX idx_invoice_country ON invoice (country);
+CREATE INDEX idx_invoice_status ON invoice (status);
+CREATE INDEX idx_invoice_date ON invoice (invoice_date);
+
+CREATE INDEX idx_line_invoice ON invoice_line (invoice_no);
+create index idx_line_product on invoice_line (stock_code);
+
+-- customer rfm view
+CREATE OR REPLACE VIEW view_customer_rfm AS
+SELECT 
+    c.customer_id,
+    c.customer_type,
+    c.country,
+    MIN(i.invoice_date)                                 AS first_purchase_date,
+    MAX(i.invoice_date)                                 AS last_purchase_date,
+    COUNT(DISTINCT i.invoice_no)                        AS total_completed_invoices,
+    COALESCE(SUM(l.quantity * l.unit_price_at_sale), 0) AS total_lifetime_spend
+FROM customer c
+LEFT JOIN invoice i 
+    ON c.customer_id = i.customer_id 
+   AND i.status = 'Completed'
+left join invoice_line l 
+    ON i.invoice_no = l.invoice_no
+GROUP BY 
+    c.customer_id, 
+    c.customer_type, 
+    c.country;
