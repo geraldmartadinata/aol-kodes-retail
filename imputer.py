@@ -77,7 +77,7 @@ def inspect_raw_dataset(input_file: Path):
         if input_file.suffix.lower() == '.xlsx':
             df = pd.read_excel(input_file, sheet_name=0)
         else:
-            df = pd.read_csv(input_file)
+            df = pd.read_csv(input_file, sep=";")
         progress.update(load_task, completed=100)
 
     total_rows = len(df)
@@ -348,7 +348,7 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
             if input_file.suffix.lower() == '.xlsx':
                 df = pd.read_excel(input_file, sheet_name=0)
             else:
-                df = pd.read_csv(input_file)
+                df = pd.read_csv(input_file, sep=";")
             progress.update(load_task, completed=75)
             try:
                 df.to_parquet(cache_file, index=False)
@@ -400,7 +400,8 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
     ) as progress:
         impute_task = progress.add_task("[3/5] Resolving timestamps, countries & SKU descriptions...", total=100)
         
-        df['InvoiceDate'] = pd.to_datetime(df['InvoiceDate'])
+        df['InvoiceDate'] = pd.to_datetime(df['InvoiceDate'], format='%d/%m/%Y %H:%M')
+
         inv_min_dates = df.groupby('Invoice')['InvoiceDate'].transform('min')
         df['InvoiceDate'] = inv_min_dates
         progress.update(impute_task, completed=25)
