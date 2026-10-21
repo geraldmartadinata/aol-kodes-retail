@@ -23,6 +23,7 @@ if sys.platform == "win32":
         pass
 
 import hashlib
+import re
 import pandas as pd
 from rich.console import Console
 from rich.panel import Panel
@@ -190,10 +191,56 @@ _DIAL_CODES = {
     "RSA": "+27", "Korea": "+82", "Thailand": "+66", "Hong Kong": "+852",
 }
 
+_STREET_NAMES = [
+    "High", "Station", "Church", "Park", "Victoria", "Green", "Manor", "Mill", "King", "Queen",
+    "London", "York", "Oak", "Maple", "Rose", "School", "Bridge", "Garden", "Hill", "Lake",
+]
+_STREET_TYPES = ["Street", "Road", "Lane", "Avenue", "Drive", "Close", "Way", "Court"]
+_CITIES = {
+    "United Kingdom": ["London", "Manchester", "Birmingham", "Leeds", "Bristol", "Liverpool", "Sheffield", "Newcastle"],
+    "Channel Islands": ["St Helier", "St Peter Port", "St Aubin"],
+    "EIRE": ["Dublin", "Cork", "Galway", "Limerick", "Waterford"],
+    "Germany": ["Berlin", "Munich", "Hamburg", "Frankfurt", "Cologne", "Stuttgart"],
+    "France": ["Paris", "Lyon", "Marseille", "Toulouse", "Nantes", "Lille"],
+    "Spain": ["Madrid", "Barcelona", "Valencia", "Seville", "Bilbao"],
+    "Netherlands": ["Amsterdam", "Rotterdam", "Utrecht", "The Hague", "Eindhoven"],
+    "Belgium": ["Brussels", "Antwerp", "Ghent", "Bruges", "Leuven"],
+    "Switzerland": ["Zurich", "Geneva", "Basel", "Bern", "Lausanne"],
+    "Portugal": ["Lisbon", "Porto", "Braga", "Coimbra", "Faro"],
+    "Australia": ["Sydney", "Melbourne", "Brisbane", "Perth", "Adelaide"],
+    "Norway": ["Oslo", "Bergen", "Trondheim", "Stavanger"],
+    "Italy": ["Rome", "Milan", "Naples", "Turin", "Florence"],
+    "Finland": ["Helsinki", "Espoo", "Tampere", "Turku"],
+    "Austria": ["Vienna", "Graz", "Salzburg", "Linz"],
+    "Sweden": ["Stockholm", "Gothenburg", "Malmo", "Uppsala"],
+    "Denmark": ["Copenhagen", "Aarhus", "Odense", "Aalborg"],
+    "Japan": ["Tokyo", "Osaka", "Nagoya", "Yokohama", "Kyoto"],
+    "Poland": ["Warsaw", "Krakow", "Gdansk", "Wroclaw"],
+    "USA": ["New York", "Chicago", "Houston", "Seattle", "Boston"],
+    "Canada": ["Toronto", "Vancouver", "Montreal", "Calgary"],
+    "Israel": ["Tel Aviv", "Jerusalem", "Haifa", "Beersheba"],
+    "Greece": ["Athens", "Thessaloniki", "Patras", "Heraklion"],
+    "Iceland": ["Reykjavik", "Akureyri", "Kopavogur"],
+    "Singapore": ["Singapore"],
+    "Lithuania": ["Vilnius", "Kaunas", "Klaipeda"],
+    "Malta": ["Valletta", "Sliema", "Mosta", "Birkirkara"],
+    "Bahrain": ["Manama", "Riffa", "Muharraq"],
+    "Cyprus": ["Nicosia", "Limassol", "Larnaca", "Paphos"],
+    "United Arab Emirates": ["Dubai", "Abu Dhabi", "Sharjah", "Ajman"],
+    "Lebanon": ["Beirut", "Tripoli", "Sidon", "Tyre"],
+    "Saudi Arabia": ["Riyadh", "Jeddah", "Dammam", "Mecca"],
+    "Czech Republic": ["Prague", "Brno", "Ostrava", "Plzen"],
+    "Brazil": ["Sao Paulo", "Rio de Janeiro", "Brasilia", "Salvador"],
+    "RSA": ["Johannesburg", "Cape Town", "Durban", "Pretoria"],
+    "Korea": ["Seoul", "Busan", "Incheon", "Daegu"],
+    "Thailand": ["Bangkok", "Chiang Mai", "Phuket", "Pattaya"],
+    "Hong Kong": ["Hong Kong", "Kowloon", "Tsuen Wan"],
+}
+
 def synth_contact(customer_id: int, country: str):
-    """Return (customer_name, email, phone) - synthetic, deterministic per customer_id."""
+    """Return (customer_name, email, phone_number, address, city) - synthetic, deterministic per customer_id."""
     if customer_id == 0:
-        return "Guest Customer", "guest@example.com", "+44 000 000 0000"
+        return "Guest Customer", "guest@example.com", "+44 000 000 0000", "Not Provided", "Not Provided"
     d = hashlib.sha256(f"kodes-retail-{customer_id}".encode()).digest()   # stable across OS / Python versions
     first = _FIRST_NAMES[int.from_bytes(d[0:2], "big") % len(_FIRST_NAMES)]
     last = _LAST_NAMES[int.from_bytes(d[2:4], "big") % len(_LAST_NAMES)]
@@ -201,8 +248,81 @@ def synth_contact(customer_id: int, country: str):
     dial = _DIAL_CODES.get(country, "+44")          # unknown/"Unspecified" -> default UK code
     phone = f"{dial} {digits[:3]} {digits[3:6]} {digits[6:]}"
     email = f"{first.lower()}.{last.lower()}.{customer_id}@example.com"   # id suffix guarantees uniqueness
-    return f"{first} {last}", email, phone
+    house_no = 1 + int.from_bytes(d[9:11], "big") % 250
+    street = _STREET_NAMES[int.from_bytes(d[11:13], "big") % len(_STREET_NAMES)]
+    street_type = _STREET_TYPES[int.from_bytes(d[13:15], "big") % len(_STREET_TYPES)]
+    cities = _CITIES.get(country, _CITIES["United Kingdom"])   # same UK fallback as the dial code
+    city = cities[int.from_bytes(d[15:17], "big") % len(cities)]
+    return f"{first} {last}", email, phone, f"{house_no} {street} {street_type}", city
 
+
+# ---------------------------------------------------------------------------
+# Product category: rule-based on the (already cleaned) description.
+# First matching rule wins, so order matters. Anything unmatched falls back to
+# "Novelty Gifts" (the shop is a giftware retailer); SKUs with no real name get
+# "Uncategorized". Edit the keyword lists below to tune the classification.
+# ---------------------------------------------------------------------------
+_CATEGORY_RULES = [
+    ("Party & Seasonal", ["CHRISTMAS", "XMAS", "EASTER", "HALLOWEEN", "VALENTINE", "ADVENT", "SANTA", "SNOWMAN",
+                          "REINDEER", "TINSEL", "BAUBLE", "PARTY", "BUNTING", "BALLOON", "CONFETTI", "BIRTHDAY",
+                          "PAPER CHAIN", "PAPER PLATE", "PAPER CUP", "PAPER NAPKIN", "CRACKER", "GARLAND",
+                          "SNOWFLAKE", "STOCKING"]),
+    ("Toys & Games", ["TOY", "DOLL", "PUZZLE", "GAME", "PLAYING CARD", "TEDDY", "SKITTLE", "YOYO",
+                      "KITE", "ROBOT", "DOMINO", "BUILDING BLOCK", "PUPPET"]),
+    ("Garden & Outdoor", ["GARDEN", "GARDENERS", "PLANT", "SEED", "FEEDER", "WATERING CAN", "PICNIC", "BBQ",
+                          "OUTDOOR", "PARASOL", "BIRD HOUSE", "WINDMILL"]),
+    ("Kitchenware", ["MUG", "CUP", "BEAKER", "TEACUP", "SAUCER", "PLATE", "BOWL", "SPOON", "FORK", "KNIFE", "CUTLERY",
+                     "TEAPOT", "TEA SET", "TEA TOWEL", "TEA COSY", "TEA STRAINER", "COFFEE", "KETTLE", "JUG",
+                     "CAKE TIN", "BISCUIT TIN", "CAKE STAND", "CAKESTAND", "CAKE CASE", "JAR", "KITCHEN",
+                     "APRON", "OVEN", "BAKING", "COOKIE", "SPATULA", "TRAY", "COASTER", "PLACEMAT",
+                     "LUNCH BOX", "SANDWICH", "PANTRY", "JAM", "EGG CUP", "SALT", "TOASTER", "COLANDER"]),
+    ("Bags & Accessories", ["BAG", "PURSE", "WALLET", "UMBRELLA", "SCARF", "HAT", "GLOVES", "NECKLACE", "BRACELET",
+                            "EARRINGS", "BROOCH", "KEYRING", "KEY RING", "SUNGLASSES", "HAIR CLIP", "HAIR BAND",
+                            "HAIRSLIDE", "HAIR GRIP", "SLIPPERS", "SOCKS", "HANDBAG", "BACKPACK", "SHOPPER",
+                            "TOTE", "BAG CHARM", "PONCHO", "FLIP FLOPS"]),
+    ("Stationery", ["NOTEBOOK", "PENCIL", "PEN", "ERASER", "STICKER", "CARD", "POSTCARD", "WRAP", "WRAPPING",
+                    "ENVELOPE", "JOURNAL", "DIARY", "CALENDAR", "STAMP", "RULER", "PAPER", "NOTEPAD", "MEMO PAD",
+                    "SKETCHBOOK", "SCRAPBOOK", "ADDRESS BOOK", "BOOKMARK", "SCISSOR", "CRAYON", "PAINT", "GLUE",
+                    "TAPE", "LABEL", "GIFT TAG", "WRITING SET", "STAPLER", "CLIPBOARD", "FOLDER"]),
+    ("Home Decor", ["T-LIGHT", "TLIGHT", "TEA LIGHT", "CANDLE", "LANTERN", "FRAME", "CUSHION", "VASE", "MIRROR",
+                    "CLOCK", "WALL", "DOORMAT", "CURTAIN", "LAMP", "LIGHT", "SIGN", "HOOK", "HANGER", "SHELF",
+                    "BASKET", "STORAGE", "WICKER", "WREATH", "ORNAMENT", "DECORATION", "RUG", "BLANKET", "THROW",
+                    "PILLOW", "PICTURE", "POSTER", "DOORSTOP", "CHANDELIER", "BIRDCAGE", "FLOWER", "FLORAL",
+                    "POT", "HOT WATER BOTTLE", "TRINKET BOX", "JEWELLERY BOX"]),
+]
+_CATEGORY_REGEX = [
+    (cat, re.compile(r"\b(?:" + "|".join(re.escape(k) for k in kws) + r")S?\b"))
+    for cat, kws in _CATEGORY_RULES
+]
+
+def categorize_product(description: str) -> str:
+    desc = str(description).upper().strip()
+    if desc in ("", "NAN", "NONE", "UNLISTED RETAIL ITEM"):
+        return "Uncategorized"
+    for category, rx in _CATEGORY_REGEX:
+        if rx.search(desc):
+            return category
+    return "Novelty Gifts"
+
+
+# ---------------------------------------------------------------------------
+# Invoice payment method: synthetic, deterministic per invoice_no.
+# Warehouse 'Loss' adjustments are not paid by anyone -> "N/A".
+# ---------------------------------------------------------------------------
+PAYMENT_METHODS = ["Credit Card", "PayPal", "Bank Transfer", "Cash", "N/A"]
+
+def synth_payment_method(invoice_no: str, status: str) -> str:
+    if status == "Loss":
+        return "N/A"
+    d = hashlib.sha256(f"kodes-pay-{invoice_no}".encode()).digest()
+    r = int.from_bytes(d[0:4], "big") % 100
+    if r < 55:
+        return "Credit Card"      # 55%
+    if r < 80:
+        return "PayPal"           # 25%
+    if r < 95:
+        return "Bank Transfer"    # 15%
+    return "Cash"                 #  5%
 
 def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 90000):
     start_time = time.time()
@@ -337,8 +457,10 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
         _contacts = [synth_contact(int(cid), ctry) for cid, ctry in zip(cust_df['customer_id'], cust_df['country'])]
         cust_df['customer_name'] = [c[0] for c in _contacts]
         cust_df['email'] = [c[1] for c in _contacts]
-        cust_df['phone'] = [c[2] for c in _contacts]
-        cust_df = cust_df[['customer_id', 'customer_name', 'email', 'phone', 'customer_type', 'country']]
+        cust_df['phone_number'] = [c[2] for c in _contacts]
+        cust_df['address'] = [c[3] for c in _contacts]
+        cust_df['city'] = [c[4] for c in _contacts]
+        cust_df = cust_df[['customer_id', 'customer_name', 'email', 'phone_number', 'address', 'city', 'customer_type', 'country']]
         progress.update(deconstruct_task, completed=25)
 
         valid_prices = df[df['Price'] > 0]
@@ -349,11 +471,19 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
         prod_base['current_unit_price'] = prod_base['stock_code'].apply(
             lambda s: round(stock_to_median_price.get(s, 0.00), 2)
         )
-        prod_df = prod_base.sort_values(by='stock_code')
+        prod_base['category'] = prod_base['description'].apply(categorize_product)
+        prod_df = prod_base.sort_values(by='stock_code')[['stock_code', 'description', 'category', 'current_unit_price']]
         progress.update(deconstruct_task, completed=50)
 
         inventory_df = prod_df[['stock_code']].copy()
         inventory_df['stock_level'] = 1000
+        # reorder_level = ~2 weeks of average demand for the SKU (completed sales only),
+        # rounded to the nearest 10 and kept between 20 and 500 (always below the 1000 opening stock).
+        _sold = df[(~df['Invoice'].str.startswith('C')) & (df['Quantity'] > 0) & (~df['Loss_Note'])]
+        _span_days = max((df['InvoiceDate'].max() - df['InvoiceDate'].min()).days + 1, 1)
+        _lead_demand = _sold.groupby('StockCode')['Quantity'].sum() / _span_days * 14
+        _reorder = ((_lead_demand / 10).round() * 10).clip(lower=20, upper=500)
+        inventory_df['reorder_level'] = inventory_df['stock_code'].map(_reorder).fillna(20).astype(int)
         inventory_df['last_updated'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         progress.update(deconstruct_task, completed=65)
 
@@ -375,6 +505,7 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
             'Country': 'country'
         }, inplace=True)
         inv_base['status'] = inv_base['invoice_no'].map(inv_majority_status)
+        inv_base['payment_method'] = [synth_payment_method(n, st) for n, st in zip(inv_base['invoice_no'], inv_base['status'])]
         inv_df = inv_base.sort_values(by='invoice_date')
         progress.update(deconstruct_task, completed=80)
 
@@ -512,6 +643,10 @@ def audit_and_repair_processed(data_dir: Path):
     is_cust_uniform = cust_types.issubset({"Registered", "Guest"})
     inv_statuses = set(dfs["INVOICE"]["status"].unique())
     is_inv_uniform = inv_statuses.issubset({"Completed", "Cancelled", "Loss"})
+    if "payment_method" in dfs["INVOICE"].columns:
+        is_pay_valid = set(dfs["INVOICE"]["payment_method"].unique()).issubset(set(PAYMENT_METHODS))
+    else:
+        is_pay_valid = True
 
     ref_table = Table(title="Foreign Key Referential Integrity Constraints", box=box.SIMPLE_HEAVY)
     ref_table.add_column("Constraint", style="cyan")
@@ -542,7 +677,7 @@ def audit_and_repair_processed(data_dir: Path):
     console.print(ref_table)
     total_orphans = orphan_cust + orphan_inv + orphan_prod + orphan_invt
 
-    if total_nulls == 0 and total_orphans == 0 and is_cust_uniform and is_inv_uniform:
+    if total_nulls == 0 and total_orphans == 0 and is_cust_uniform and is_inv_uniform and is_pay_valid:
         lines = dfs["INVOICE_LINE"].copy()
         lines["quantity"] = pd.to_numeric(lines["quantity"], errors='coerce').fillna(0)
         price_col = 'unit_price_at_sale' if 'unit_price_at_sale' in lines.columns else 'unit_price'
@@ -580,7 +715,8 @@ def audit_and_repair_processed(data_dir: Path):
             f"• Missing / Null Values: [bold yellow]{total_nulls}[/bold yellow]\n"
             f"• Orphan Foreign Keys: [bold yellow]{total_orphans}[/bold yellow]\n"
             f"• Customer Type Uniformity: {'[green]OK[/green]' if is_cust_uniform else '[red]FAILED[/red]'}\n"
-            f"• Invoice Status Uniformity: {'[green]OK[/green]' if is_inv_uniform else '[red]FAILED[/red]'}",
+            f"• Invoice Status Uniformity: {'[green]OK[/green]' if is_inv_uniform else '[red]FAILED[/red]'}\n"
+            f"• Payment Method Validity: {'[green]OK[/green]' if is_pay_valid else '[red]FAILED[/red]'}",
             title="[bold red]ANOMALY ALERT[/bold red]",
             border_style="red",
             box=box.DOUBLE
@@ -599,6 +735,10 @@ def audit_and_repair_processed(data_dir: Path):
                         df_repair[col] = df_repair[col].replace({'': 'Guest', 'nan': 'Guest'})
                     elif col == 'status':
                         df_repair[col] = df_repair[col].replace({'': 'Completed', 'nan': 'Completed'})
+                    elif col == 'payment_method':
+                        df_repair[col] = df_repair[col].replace({'': 'Credit Card', 'nan': 'Credit Card'})
+                    elif col == 'category':
+                        df_repair[col] = df_repair[col].replace({'': 'Uncategorized', 'nan': 'Uncategorized'})
                 df_repair.to_csv(path, index=False, encoding='utf-8')
             console.print("[bold green]✓ Automatic sanitization completed. Re-running audit...[/bold green]\n")
             return audit_and_repair_processed(data_dir)
