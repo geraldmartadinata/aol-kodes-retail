@@ -29,7 +29,7 @@ FOR EACH ROW
 EXECUTE FUNCTION fn_trg_update_inventory();
 
 -- customer invoice history
-CREATE OR REPLACE FUNCTION GetCustomerInvoiceHistory(p_customer_id INT)
+CREATE OR REPLACE FUNCTION GetCustomerInvoiceHistory(p_customer_id VARCHAR(10))
 RETURNS TABLE (
     invoice_no          VARCHAR(20),
     invoice_date        TIMESTAMP,
@@ -91,7 +91,7 @@ EXECUTE FUNCTION fn_trg_restore_inventory_on_cancel();
 
 -- DEMO (run manually after import; uncomment): a sale lowers stock by 10
 -- SELECT stock_code, stock_level FROM inventory WHERE stock_code = '85123A';
--- INSERT INTO invoice VALUES ('DEMO-1', CURRENT_TIMESTAMP, 0, 'United Kingdom', 'Completed');
--- INSERT INTO invoice_line VALUES ((SELECT MAX(line_id) + 1 FROM invoice_line), 'DEMO-1', '85123A', 10, 2.50);
+-- INSERT INTO invoice VALUES ('DEMO-1', CURRENT_TIMESTAMP, '0', 'United Kingdom', 'Completed', 'Cash');
+-- INSERT INTO invoice_line VALUES ((SELECT LPAD((MAX(line_id)::INT + 1)::TEXT, 8, '0') FROM invoice_line), 'DEMO-1', '85123A', 10, 2.50);
 -- SELECT stock_code, stock_level FROM inventory WHERE stock_code = '85123A';
--- SELECT * FROM GetCustomerInvoiceHistory(12346);
+-- SELECT * FROM GetCustomerInvoiceHistory('12346');

@@ -9,7 +9,7 @@ DROP TABLE IF EXISTS customer CASCADE;
 -- customer table
 -- column order matches customers.csv, so \copy works without a column list
 CREATE TABLE customer (
-    customer_id     INT             NOT NULL,
+    customer_id     VARCHAR(10)     NOT NULL,
     customer_name   VARCHAR(100)    NOT NULL,
     email           VARCHAR(150)    NOT NULL,
     phone_number    VARCHAR(30)     NOT NULL,
@@ -50,7 +50,7 @@ CREATE TABLE inventory (
 CREATE TABLE invoice (
     invoice_no      VARCHAR(20)     NOT NULL,
     invoice_date    TIMESTAMP       NOT NULL,
-    customer_id     INT             NOT NULL,
+    customer_id     VARCHAR(10)     NOT NULL,
     country         VARCHAR(60)     NOT NULL,
     status          VARCHAR(20)     NOT NULL,
     payment_method  VARCHAR(20)     NOT NULL,
@@ -65,7 +65,7 @@ CREATE TABLE invoice (
 
 -- invoice line table
 CREATE TABLE invoice_line (
-    line_id             BIGINT          NOT NULL,
+    line_id             CHAR(8)         NOT NULL,
     invoice_no          VARCHAR(20)     NOT NULL,
     stock_code          VARCHAR(30)     NOT NULL,
     quantity            INT             NOT NULL,

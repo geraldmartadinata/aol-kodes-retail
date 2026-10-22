@@ -43,6 +43,18 @@ BANNER = r"""
 [dim] High-Performance Data Engineering & Quality Assurance CLI • v1.3.0[/dim]
 """
 
+def read_raw_csv(path: Path) -> pd.DataFrame:
+    """Read the raw export whichever way it was saved: ',' or ';' delimiter, UTF-8 (with/without BOM) or Windows-1252."""
+    for enc in ("utf-8-sig", "cp1252"):
+        try:
+            with open(path, encoding=enc) as fh:
+                header = fh.readline()
+            return pd.read_csv(path, sep=";" if header.count(";") > header.count(",") else ",", encoding=enc)
+        except UnicodeDecodeError:
+            continue
+    raise ValueError(f"Cannot decode {path}")
+
+
 def print_header():
     console.print(BANNER)
     info_panel = Panel(
@@ -77,7 +89,7 @@ def inspect_raw_dataset(input_file: Path):
         if input_file.suffix.lower() == '.xlsx':
             df = pd.read_excel(input_file, sheet_name=0)
         else:
-            df = pd.read_csv(input_file, sep=";")
+            df = read_raw_csv(input_file)
         progress.update(load_task, completed=100)
 
     total_rows = len(df)
@@ -348,7 +360,7 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
             if input_file.suffix.lower() == '.xlsx':
                 df = pd.read_excel(input_file, sheet_name=0)
             else:
-                df = pd.read_csv(input_file, sep=";")
+                df = read_raw_csv(input_file)
             progress.update(load_task, completed=75)
             try:
                 df.to_parquet(cache_file, index=False)
@@ -400,7 +412,8 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
     ) as progress:
         impute_task = progress.add_task("[3/5] Resolving timestamps, countries & SKU descriptions...", total=100)
         
-        df['InvoiceDate'] = pd.to_datetime(df['InvoiceDate'], format='%d/%m/%Y %H:%M')
+        _fmt = 'ISO8601' if re.match(r'\d{4}-\d{2}-\d{2}', str(df['InvoiceDate'].iloc[0])) else '%d/%m/%Y %H:%M'
+        df['InvoiceDate'] = pd.to_datetime(df['InvoiceDate'], format=_fmt)
 
         inv_min_dates = df.groupby('Invoice')['InvoiceDate'].transform('min')
         df['InvoiceDate'] = inv_min_dates
@@ -519,7 +532,7 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
             'unit_price_at_sale': df['Price'].round(2)
         })
         items_df.reset_index(drop=True, inplace=True)
-        items_df['line_id'] = items_df.index + 1
+        items_df['line_id'] = (items_df.index + 1).astype(str).str.zfill(8)   # CHAR(8): '00000001' ... sorts correctly as text
         items_df = items_df[['line_id', 'invoice_no', 'stock_code', 'quantity', 'unit_price_at_sale']]
         progress.update(deconstruct_task, completed=100)
 
@@ -615,7 +628,7 @@ def audit_and_repair_processed(data_dir: Path):
         if not path.exists():
             console.print(f" [bold red][FAIL][/bold red] File not found: {path.name}. Please run Normalization (Option 2) first!")
             return False
-        dfs[name] = pd.read_csv(path, dtype=str)
+        dfs[name] = pd.read_csv(path, dtype=str, keep_default_na=False)   # keep 'N/A' as text
 
     null_table = Table(title="Completeness Audit (Zero-Null Check)", box=box.SIMPLE_HEAVY)
     null_table.add_column("Table", style="cyan")

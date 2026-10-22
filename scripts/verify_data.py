@@ -60,7 +60,7 @@ def run_tests():
         if not path.exists():
             console.print(f" [bold red][FAIL][/bold red] Missing file: {path.name}")
             sys.exit(1)
-        dfs[name] = pd.read_csv(path, dtype=str)
+        dfs[name] = pd.read_csv(path, dtype=str, keep_default_na=False)   # keep 'N/A' as text
         console.print(f" [bold green][PASS][/bold green] Ingested [cyan]{path.name}[/cyan] ({len(dfs[name]):,} records)")
 
     # 2. Null Value Check across ALL columns

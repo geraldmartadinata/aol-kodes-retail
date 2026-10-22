@@ -8,11 +8,12 @@
 """
 Build data/retail.db (portable SQLite copy of the 3NF schema) from the five cleaned CSVs in data/processed/.
 
-Cleaning/normalisation lives ONLY in imputer.py (single source of truth). This script deliberately does no
+The schema comes from sql/schema.sql and the cleaning from imputer.py (single source of truth). This script deliberately does no
 cleaning, so the CSVs, retail.db, the SQL scripts and the documentation can never disagree.
 
 Run order:   python imputer.py --all     ->  python scripts/build_retail_db.py
 """
+import re
 import sqlite3
 import sys
 import time
@@ -27,69 +28,16 @@ from rich.table import Table
 console = Console(highlight=False)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-DDL = """
-PRAGMA foreign_keys = ON;
+SCHEMA_SQL = PROJECT_ROOT / "sql" / "schema.sql"
 
-CREATE TABLE customer (
-    customer_id     INTEGER PRIMARY KEY,
-    customer_name   TEXT NOT NULL,
-    email           TEXT NOT NULL UNIQUE,
-    phone           TEXT NOT NULL,
-    customer_type   TEXT NOT NULL CHECK(customer_type IN ('Registered', 'Guest')),
-    country         TEXT NOT NULL
-);
 
-CREATE TABLE product (
-    stock_code          TEXT PRIMARY KEY,
-    description         TEXT NOT NULL,
-    current_unit_price  REAL NOT NULL DEFAULT 0.00 CHECK(current_unit_price >= 0)
-);
+def load_ddl() -> str:
+    """Use sql/schema.sql as the single source of truth (PostgreSQL syntax -> SQLite with two harmless rewrites)."""
+    ddl = SCHEMA_SQL.read_text(encoding="utf-8")
+    ddl = re.sub(r"\s+CASCADE;", ";", ddl)                       # SQLite has no DROP ... CASCADE
+    ddl = ddl.replace("CREATE OR REPLACE VIEW", "CREATE VIEW")    # SQLite has no CREATE OR REPLACE VIEW
+    return "PRAGMA foreign_keys = ON;\n" + ddl
 
-CREATE TABLE inventory (
-    stock_code      TEXT PRIMARY KEY,
-    stock_level     INTEGER NOT NULL DEFAULT 1000,
-    last_updated    TEXT NOT NULL,
-    FOREIGN KEY (stock_code) REFERENCES product(stock_code) ON DELETE CASCADE ON UPDATE CASCADE
-);
-
-CREATE TABLE invoice (
-    invoice_no      TEXT PRIMARY KEY,
-    invoice_date    TEXT NOT NULL,
-    customer_id     INTEGER NOT NULL,
-    country         TEXT NOT NULL,
-    status          TEXT NOT NULL CHECK(status IN ('Completed', 'Cancelled', 'Loss')),
-    FOREIGN KEY (customer_id) REFERENCES customer(customer_id) ON DELETE RESTRICT ON UPDATE CASCADE
-);
-
-CREATE TABLE invoice_line (
-    line_id             INTEGER PRIMARY KEY,
-    invoice_no          TEXT NOT NULL,
-    stock_code          TEXT NOT NULL,
-    quantity            INTEGER NOT NULL CHECK(quantity > 0),
-    unit_price_at_sale  REAL NOT NULL CHECK(unit_price_at_sale >= 0),
-    FOREIGN KEY (invoice_no) REFERENCES invoice(invoice_no) ON DELETE CASCADE ON UPDATE CASCADE,
-    FOREIGN KEY (stock_code) REFERENCES product(stock_code) ON DELETE RESTRICT ON UPDATE CASCADE
-);
-
-CREATE INDEX idx_invoice_cust   ON invoice(customer_id);
-CREATE INDEX idx_invoice_status ON invoice(status);
-CREATE INDEX idx_line_inv       ON invoice_line(invoice_no);
-CREATE INDEX idx_line_prod      ON invoice_line(stock_code);
-
-CREATE VIEW view_customer_rfm AS
-SELECT
-    c.customer_id,
-    c.customer_type,
-    c.country,
-    MIN(i.invoice_date)                                 AS first_purchase_date,
-    MAX(i.invoice_date)                                 AS last_purchase_date,
-    COUNT(DISTINCT i.invoice_no)                        AS total_completed_invoices,
-    COALESCE(SUM(l.quantity * l.unit_price_at_sale), 0) AS total_lifetime_spend
-FROM customer c
-LEFT JOIN invoice i ON c.customer_id = i.customer_id AND i.status = 'Completed'
-LEFT JOIN invoice_line l ON i.invoice_no = l.invoice_no
-GROUP BY c.customer_id, c.customer_type, c.country;
-"""
 
 FILES = [  # (table, csv name) - parents first so foreign keys are satisfied during load
     ("customer", "customers.csv"),
@@ -115,12 +63,12 @@ def main(data_dir: Path = PROJECT_ROOT / "data" / "processed", db_path: Path = P
         db_path.unlink()
 
     conn = sqlite3.connect(db_path)
-    conn.executescript(DDL)
+    conn.executescript(load_ddl())
     summary = Table(title="Loaded tables", box=box.ROUNDED)
     summary.add_column("Table")
     summary.add_column("Rows", justify="right")
     for table, name in FILES:
-        df = pd.read_csv(data_dir / name)
+        df = pd.read_csv(data_dir / name, dtype=str, keep_default_na=False)   # keep the text 'N/A' (payment_method)
         df.to_sql(table, conn, if_exists="append", index=False, chunksize=100_000)
         summary.add_row(table, f"{len(df):,}")
     conn.commit()
