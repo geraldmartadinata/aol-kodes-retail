@@ -30,7 +30,6 @@ if sys.platform == "win32":
         pass
 
 console = Console(highlight=False)
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 def get_connection_url(cli_url: str = None) -> str:
@@ -60,7 +59,6 @@ def test_connection(url: str):
         return True
     except Exception as e:
         console.print(f"[bold red]Connection Failed:[/bold red] {e}")
-        console.print("\n[dim]Tips:\n- Make sure the password inside the URL is correct.\n- If your network does not support direct IPv6, use the Connection Pooler URL from Supabase Settings -> Database.[/dim]")
         return False
 
 def push_to_supabase(url: str):
@@ -84,23 +82,33 @@ def push_to_supabase(url: str):
     conn.autocommit = False
     cur = conn.cursor()
 
+    # Disable session statement timeout for bulk ingest
+    cur.execute("SET statement_timeout = 0;")
+
     # Step 2: Execute DDL Schema
     console.print("[bold yellow]Step 2: Deploying 3NF DDL Schema (schema.sql)...[/bold yellow]")
     with open(schema_file, "r", encoding="utf-8") as f:
         schema_sql = f.read()
 
-    # Filter out client-side \copy and load data comments if any
     cur.execute(schema_sql)
+    
+    # Temporarily drop line constraints for fast streaming
+    cur.execute("""
+        ALTER TABLE invoice_line DROP CONSTRAINT IF EXISTS fk_line_invoice;
+        ALTER TABLE invoice_line DROP CONSTRAINT IF EXISTS fk_line_product;
+        DROP INDEX IF EXISTS idx_line_invoice;
+        DROP INDEX IF EXISTS idx_line_product;
+    """)
     conn.commit()
-    console.print(" [bold green][OK][/bold green] Tables, constraints, and views created successfully.")
+    console.print(" [bold green][OK][/bold green] Base tables created successfully.")
 
     # Step 3: Fast Ingestion via COPY
     console.print("\n[bold yellow]Step 3: Fast Streaming CSV Data into Supabase Tables...[/bold yellow]")
     tables = [
-        ("customer", data_dir / "customers.csv", "(customer_id, customer_name, email, phone, customer_type, country)"),
-        ("product", data_dir / "products.csv", "(stock_code, description, current_unit_price)"),
-        ("inventory", data_dir / "inventory.csv", "(stock_code, stock_level, last_updated)"),
-        ("invoice", data_dir / "invoices.csv", "(invoice_no, invoice_date, customer_id, country, status)"),
+        ("customer", data_dir / "customers.csv", "(customer_id, customer_name, email, phone_number, address, city, customer_type, country)"),
+        ("product", data_dir / "products.csv", "(stock_code, description, category, current_unit_price)"),
+        ("inventory", data_dir / "inventory.csv", "(stock_code, stock_level, reorder_level, last_updated)"),
+        ("invoice", data_dir / "invoices.csv", "(invoice_no, invoice_date, customer_id, country, status, payment_method)"),
         ("invoice_line", data_dir / "invoice_lines.csv", "(line_id, invoice_no, stock_code, quantity, unit_price_at_sale)"),
     ]
 
@@ -117,8 +125,24 @@ def push_to_supabase(url: str):
         conn.commit()
         console.print(f" [bold green][OK][/bold green] Loaded [cyan]{table_name}[/cyan] from {csv_path.name} in {time.time() - t_start:.2f}s")
 
-    # Step 4: Verification
-    console.print("\n[bold yellow]Step 4: Verifying Live Record Counts on Supabase...[/bold yellow]")
+    # Step 4: Re-apply constraints and indexes
+    console.print("\n[bold yellow]Step 4: Re-enforcing Foreign Keys and Indexes...[/bold yellow]")
+    t_idx = time.time()
+    cur.execute("""
+        ALTER TABLE invoice_line ADD CONSTRAINT fk_line_invoice 
+            FOREIGN KEY (invoice_no) REFERENCES invoice (invoice_no) 
+            ON UPDATE CASCADE ON DELETE CASCADE;
+        ALTER TABLE invoice_line ADD CONSTRAINT fk_line_product 
+            FOREIGN KEY (stock_code) REFERENCES product (stock_code) 
+            ON UPDATE CASCADE ON DELETE RESTRICT;
+        CREATE INDEX idx_line_invoice ON invoice_line (invoice_no);
+        CREATE INDEX idx_line_product ON invoice_line (stock_code);
+    """)
+    conn.commit()
+    console.print(f" [bold green][OK][/bold green] Foreign keys and indexes created in {time.time() - t_idx:.2f}s")
+
+    # Step 5: Verification
+    console.print("\n[bold yellow]Step 5: Verifying Live Record Counts on Supabase...[/bold yellow]")
     summary = Table(title="[bold green]Live Supabase Cloud Database Summary[/bold green]", box=box.ROUNDED)
     summary.add_column("Table Name", style="cyan")
     summary.add_column("Row Count on Supabase", justify="right", style="green")
@@ -163,16 +187,13 @@ def pull_from_supabase(url: str):
         "invoice_line": "invoice_lines.csv"
     }
 
-    # Open SQLite to sync local db
     sq_conn = sqlite3.connect(sqlite_db_path)
 
     for tbl in tables:
         console.print(f"Pulling [cyan]{tbl}[/cyan] from Supabase...")
         df = pd.read_sql_query(f"SELECT * FROM {tbl};", conn)
-        # Save to CSV
         csv_file = data_dir / csv_names[tbl]
         df.to_csv(csv_file, index=False)
-        # Update SQLite table
         df.to_sql(tbl, sq_conn, if_exists='replace', index=False)
         console.print(f" [bold green][OK][/bold green] Synced {len(df):,} rows for {tbl}")
 
@@ -197,7 +218,6 @@ def main():
     elif args.test:
         test_connection(url)
     else:
-        # Default test then ask
         if test_connection(url):
             console.print("\n[bold yellow]Options:[/bold yellow]")
             console.print(" Run [cyan]uv run scripts/sync_supabase.py --push[/cyan] to push data to Supabase.")

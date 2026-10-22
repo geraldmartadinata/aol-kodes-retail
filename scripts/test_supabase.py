@@ -293,11 +293,11 @@ def test_phase4_trigger(conn):
     console.print(f" • Stock Before Insertion: [bold cyan]{stock_before}[/bold cyan] units (Updated: {updated_before})")
 
     # Insert a temporary test sale line (10 units)
-    test_line_id = 999999999999
+    test_line_id = '99999999'
     test_qty = 10
     cur.execute(f"""
     INSERT INTO invoice_line (line_id, invoice_no, stock_code, quantity, unit_price_at_sale)
-    VALUES ({test_line_id}, '536365', '85123A', {test_qty}, 2.55);
+    VALUES ('{test_line_id}', '536365', '85123A', {test_qty}, 2.55);
     """)
 
     # Check updated stock level
@@ -309,7 +309,7 @@ def test_phase4_trigger(conn):
     console.print(f" • Trigger Evaluation: {'[bold green]PASSED (Stock decreased by exactly 10 units)[/bold green]' if trigger_works else '[bold red]FAILED[/bold red]'}")
 
     # Cleanup test line item & restore stock level
-    cur.execute(f"DELETE FROM invoice_line WHERE line_id = {test_line_id};")
+    cur.execute(f"DELETE FROM invoice_line WHERE line_id = '{test_line_id}';")
     cur.execute(f"UPDATE inventory SET stock_level = {stock_before}, last_updated = '{updated_before}' WHERE stock_code = '85123A';")
     conn.commit()
     cur.close()
@@ -321,11 +321,11 @@ def test_phase4_procedure(conn):
     cur = conn.cursor()
 
     # Call procedure for CustomerID = 12346
-    test_cust_id = 12346
-    cur.execute(f"SELECT * FROM GetCustomerInvoiceHistory({test_cust_id});")
+    test_cust_id = '12346'
+    cur.execute(f"SELECT * FROM GetCustomerInvoiceHistory('{test_cust_id}');")
     rows = cur.fetchall()
 
-    t = Table(title=f"GetCustomerInvoiceHistory({test_cust_id}) Output on Supabase", box=box.ROUNDED)
+    t = Table(title=f"GetCustomerInvoiceHistory('{test_cust_id}') Output on Supabase", box=box.ROUNDED)
     t.add_column("Invoice No", style="cyan")
     t.add_column("Invoice Date", style="white")
     t.add_column("Status", style="yellow")

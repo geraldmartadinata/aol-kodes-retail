@@ -1,9 +1,6 @@
-# PowerShell runner for Martadinata CSV Imputer
-$uvPath = "C:\Users\steph\AppData\Local\hermes\bin\uv.exe"
+# PowerShell runner for CSV Imputer & 3NF Normalizer
 if (Get-Command uv -ErrorAction SilentlyContinue) {
-    $uvCmd = "uv"
+    & uv run "$PSScriptRoot\imputer.py" @args
 } else {
-    $uvCmd = $uvPath
+    & python "$PSScriptRoot\imputer.py" @args
 }
-
-& $uvCmd run "$PSScriptRoot\imputer.py" @args

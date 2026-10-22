@@ -9,7 +9,6 @@
 ================================================================================
   KoDes Retail: Database Backup Generator
   Generates a production database backup file as required by project deliverables.
-  Author: Gerald Martadinata
 ================================================================================
 """
 
