@@ -41,70 +41,12 @@ def get_connection():
 
 def deploy_advanced_features(conn):
     console.print("\n[bold yellow]Deploying Phase 4 Features (Trigger & Procedure) to Supabase...[/bold yellow]")
+    advanced_sql = (PROJECT_ROOT / "sql" / "advanced.sql").read_text(encoding="utf-8")   # single source of truth
     cur = conn.cursor()
-
-    # 1. Automated Inventory Trigger
-    trigger_sql = """
-    CREATE OR REPLACE FUNCTION fn_trg_update_inventory()
-    RETURNS TRIGGER AS $$
-    BEGIN
-        UPDATE inventory
-        SET 
-            stock_level = stock_level - NEW.quantity,
-            last_updated = CURRENT_TIMESTAMP
-        WHERE stock_code = NEW.stock_code;
-
-        RETURN NEW;
-    END;
-    $$ LANGUAGE plpgsql;
-
-    DROP TRIGGER IF EXISTS trg_update_inventory ON invoice_line;
-
-    CREATE TRIGGER trg_update_inventory
-    AFTER INSERT ON invoice_line
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_trg_update_inventory();
-    """
-    cur.execute(trigger_sql)
-
-    # 2. Stored Procedure / Table Function
-    proc_sql = """
-    CREATE OR REPLACE FUNCTION GetCustomerInvoiceHistory(p_customer_id INT)
-    RETURNS TABLE (
-        invoice_no          VARCHAR(20),
-        invoice_date        TIMESTAMP,
-        status              VARCHAR(20),
-        country             VARCHAR(60),
-        total_line_items    BIGINT,
-        total_invoice_value NUMERIC(12, 2)
-    ) AS $$
-    BEGIN
-        RETURN QUERY
-        SELECT 
-            i.invoice_no,
-            i.invoice_date,
-            i.status,
-            i.country,
-            COUNT(l.line_id)                                                AS total_line_items,
-            ROUND(COALESCE(SUM(l.quantity * l.unit_price_at_sale), 0), 2)  AS total_invoice_value
-        FROM invoice i
-        LEFT JOIN invoice_line l 
-            ON i.invoice_no = l.invoice_no
-        WHERE i.customer_id = p_customer_id
-        GROUP BY 
-            i.invoice_no, 
-            i.invoice_date, 
-            i.status, 
-            i.country
-        ORDER BY 
-            i.invoice_date DESC;
-    END;
-    $$ LANGUAGE plpgsql;
-    """
-    cur.execute(proc_sql)
+    cur.execute(advanced_sql)
     conn.commit()
     cur.close()
-    console.print(" [bold green][OK][/bold green] Trigger 'trg_update_inventory' and Function 'GetCustomerInvoiceHistory' active on Supabase.")
+    console.print(" [bold green][OK][/bold green] sql/advanced.sql deployed (status-aware inventory trigger + GetCustomerInvoiceHistory).")
 
 def test_phase2_tables(conn):
     console.print("\n[bold yellow]Testing Phase 2: Physical Tables & Live Cloud Record Counts...[/bold yellow]")
@@ -284,37 +226,37 @@ def test_phase3_queries(conn):
     cur.close()
 
 def test_phase4_trigger(conn):
-    console.print("\n[bold yellow]Testing Phase 4: Automated Inventory Synchronization Trigger...[/bold yellow]")
+    console.print("\n[bold yellow]Testing Phase 4: Status-aware Inventory Trigger (sale / return / write-off)...[/bold yellow]")
     cur = conn.cursor()
+    sku = '85123A'
+    cur.execute("SELECT stock_level, last_updated FROM inventory WHERE stock_code = %s;", (sku,))
+    stock_start, updated_start = cur.fetchone()
+    console.print(f" • Starting stock of {sku}: [bold cyan]{stock_start}[/bold cyan] units")
 
-    # Test item: '85123A'
-    cur.execute("SELECT stock_level, last_updated FROM inventory WHERE stock_code = '85123A';")
-    stock_before, updated_before = cur.fetchone()
-    console.print(f" • Stock Before Insertion: [bold cyan]{stock_before}[/bold cyan] units (Updated: {updated_before})")
+    cases = [("Completed", "Credit Card", -10), ("Cancelled", "Credit Card", 10), ("Loss", "N/A", -10)]
+    all_ok = True
+    for n, (status, pay, expected) in enumerate(cases, start=1):
+        inv_no, line_id = f"T-TRG-{n}", f"9999999{n}"      # 8 characters, cannot collide with real lines (max 01020083)
+        cur.execute("INSERT INTO invoice (invoice_no, invoice_date, customer_id, country, status, payment_method) "
+                    "VALUES (%s, CURRENT_TIMESTAMP, '0', 'United Kingdom', %s, %s);", (inv_no, status, pay))
+        cur.execute("SELECT stock_level FROM inventory WHERE stock_code = %s;", (sku,))
+        before = cur.fetchone()[0]
+        cur.execute("INSERT INTO invoice_line (line_id, invoice_no, stock_code, quantity, unit_price_at_sale) "
+                    "VALUES (%s, %s, %s, 10, 2.55);", (line_id, inv_no, sku))
+        cur.execute("SELECT stock_level FROM inventory WHERE stock_code = %s;", (sku,))
+        after = cur.fetchone()[0]
+        ok = (after - before == expected)
+        all_ok = all_ok and ok
+        console.print(f" • {status:<9} line of 10 units: stock {before} -> {after} ({after - before:+d}, expected {expected:+d}): "
+                      f"{'[bold green]PASSED[/bold green]' if ok else '[bold red]FAILED[/bold red]'}")
 
-    # Insert a temporary test sale line (10 units)
-    test_line_id = '99999999'
-    test_qty = 10
-    cur.execute(f"""
-    INSERT INTO invoice_line (line_id, invoice_no, stock_code, quantity, unit_price_at_sale)
-    VALUES ('{test_line_id}', '536365', '85123A', {test_qty}, 2.55);
-    """)
-
-    # Check updated stock level
-    cur.execute("SELECT stock_level, last_updated FROM inventory WHERE stock_code = '85123A';")
-    stock_after, updated_after = cur.fetchone()
-    console.print(f" • Stock After Sale Insertion ({test_qty} units): [bold green]{stock_after}[/bold green] units (Updated: {updated_after})")
-
-    trigger_works = (stock_after == stock_before - test_qty)
-    console.print(f" • Trigger Evaluation: {'[bold green]PASSED (Stock decreased by exactly 10 units)[/bold green]' if trigger_works else '[bold red]FAILED[/bold red]'}")
-
-    # Cleanup test line item & restore stock level
-    cur.execute(f"DELETE FROM invoice_line WHERE line_id = '{test_line_id}';")
-    cur.execute(f"UPDATE inventory SET stock_level = {stock_before}, last_updated = '{updated_before}' WHERE stock_code = '85123A';")
+    # cleanup: delete temp invoices (their lines cascade) and restore the original stock level
+    cur.execute("DELETE FROM invoice WHERE invoice_no LIKE 'T-TRG-%';")
+    cur.execute("UPDATE inventory SET stock_level = %s, last_updated = %s WHERE stock_code = %s;", (stock_start, updated_start, sku))
     conn.commit()
     cur.close()
-    console.print(" • Cleaned up temporary test line item and restored inventory state.")
-    return trigger_works
+    console.print(" • Cleaned up temporary invoices and restored inventory state.")
+    return all_ok
 
 def test_phase4_procedure(conn):
     console.print("\n[bold yellow]Testing Phase 4: Stored Procedure (GetCustomerInvoiceHistory)...[/bold yellow]")
@@ -322,10 +264,10 @@ def test_phase4_procedure(conn):
 
     # Call procedure for CustomerID = 12346
     test_cust_id = '12346'
-    cur.execute(f"SELECT * FROM GetCustomerInvoiceHistory('{test_cust_id}');")
+    cur.execute("SELECT * FROM GetCustomerInvoiceHistory(%s);", (test_cust_id,))
     rows = cur.fetchall()
 
-    t = Table(title=f"GetCustomerInvoiceHistory('{test_cust_id}') Output on Supabase", box=box.ROUNDED)
+    t = Table(title=f"GetCustomerInvoiceHistory({test_cust_id}) Output on Supabase", box=box.ROUNDED)
     t.add_column("Invoice No", style="cyan")
     t.add_column("Invoice Date", style="white")
     t.add_column("Status", style="yellow")
