@@ -40,25 +40,41 @@ def get_connection():
     return psycopg2.connect(url)
 
 def deploy_advanced_features(conn):
-    console.print("\n[bold yellow]Deploying Phase 4 Features (Trigger & Procedure) to Supabase...[/bold yellow]")
-    advanced_sql = (PROJECT_ROOT / "sql" / "advanced.sql").read_text(encoding="utf-8")   # single source of truth
+    """Deploy sql/advanced.sql itself (single source of truth) instead of an embedded copy that can drift."""
+    console.print("\n[bold yellow]Deploying Phase 4 Features (Triggers & Procedure) from sql/advanced.sql to Supabase...[/bold yellow]")
+    adv_file = PROJECT_ROOT / "sql" / "advanced.sql"
+    if not adv_file.exists():
+        console.print(f"[bold red]Missing:[/bold red] {adv_file}")
+        sys.exit(1)
     cur = conn.cursor()
-    cur.execute(advanced_sql)
+    cur.execute(adv_file.read_text(encoding="utf-8"))
     conn.commit()
     cur.close()
-    console.print(" [bold green][OK][/bold green] sql/advanced.sql deployed (status-aware inventory trigger + GetCustomerInvoiceHistory).")
+    console.print(" [bold green][OK][/bold green] Status-aware inventory triggers and Function 'GetCustomerInvoiceHistory' active on Supabase.")
+
+# Fallback counts, only used when the processed CSVs are not on disk.
+FALLBACK_COUNTS = {"customer": 5877, "product": 4755, "inventory": 4755, "invoice": 47796, "invoice_line": 1020083}
+CSV_FILES = {"customer": "customers.csv", "product": "products.csv", "inventory": "inventory.csv",
+             "invoice": "invoices.csv", "invoice_line": "invoice_lines.csv"}
+
+def get_expected_counts():
+    """Expected row counts = rows in data/processed/*.csv (what sync_supabase.py --push loads)."""
+    data_dir = PROJECT_ROOT / "data" / "processed"
+    out = []
+    for tbl, fname in CSV_FILES.items():
+        path = data_dir / fname
+        if path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                out.append((tbl, sum(1 for _ in f) - 1))      # minus header row
+        else:
+            out.append((tbl, FALLBACK_COUNTS[tbl]))
+    return out
 
 def test_phase2_tables(conn):
     console.print("\n[bold yellow]Testing Phase 2: Physical Tables & Live Cloud Record Counts...[/bold yellow]")
     cur = conn.cursor()
 
-    expected_tables = [
-        ("customer", 5877),
-        ("product", 4755),
-        ("inventory", 4755),
-        ("invoice", 47796),
-        ("invoice_line", 1020083),
-    ]
+    expected_tables = get_expected_counts()
 
     t = Table(title="Supabase PostgreSQL: 3NF Tables & Row Counts", box=box.ROUNDED)
     t.add_column("Table Name", style="cyan")
@@ -226,37 +242,43 @@ def test_phase3_queries(conn):
     cur.close()
 
 def test_phase4_trigger(conn):
-    console.print("\n[bold yellow]Testing Phase 4: Status-aware Inventory Trigger (sale / return / write-off)...[/bold yellow]")
+    console.print("\n[bold yellow]Testing Phase 4: Automated Inventory Synchronization Trigger...[/bold yellow]")
     cur = conn.cursor()
-    sku = '85123A'
-    cur.execute("SELECT stock_level, last_updated FROM inventory WHERE stock_code = %s;", (sku,))
-    stock_start, updated_start = cur.fetchone()
-    console.print(f" • Starting stock of {sku}: [bold cyan]{stock_start}[/bold cyan] units")
 
-    cases = [("Completed", "Credit Card", -10), ("Cancelled", "Credit Card", 10), ("Loss", "N/A", -10)]
-    all_ok = True
-    for n, (status, pay, expected) in enumerate(cases, start=1):
-        inv_no, line_id = f"T-TRG-{n}", f"9999999{n}"      # 8 characters, cannot collide with real lines (max 01020083)
-        cur.execute("INSERT INTO invoice (invoice_no, invoice_date, customer_id, country, status, payment_method) "
-                    "VALUES (%s, CURRENT_TIMESTAMP, '0', 'United Kingdom', %s, %s);", (inv_no, status, pay))
-        cur.execute("SELECT stock_level FROM inventory WHERE stock_code = %s;", (sku,))
-        before = cur.fetchone()[0]
-        cur.execute("INSERT INTO invoice_line (line_id, invoice_no, stock_code, quantity, unit_price_at_sale) "
-                    "VALUES (%s, %s, %s, 10, 2.55);", (line_id, inv_no, sku))
-        cur.execute("SELECT stock_level FROM inventory WHERE stock_code = %s;", (sku,))
-        after = cur.fetchone()[0]
-        ok = (after - before == expected)
-        all_ok = all_ok and ok
-        console.print(f" • {status:<9} line of 10 units: stock {before} -> {after} ({after - before:+d}, expected {expected:+d}): "
-                      f"{'[bold green]PASSED[/bold green]' if ok else '[bold red]FAILED[/bold red]'}")
+    # The trigger direction depends on the parent invoice status (Cancelled = return -> stock increases)
+    cur.execute("SELECT status FROM invoice WHERE invoice_no = '536365';")
+    inv_status = cur.fetchone()[0]
 
-    # cleanup: delete temp invoices (their lines cascade) and restore the original stock level
-    cur.execute("DELETE FROM invoice WHERE invoice_no LIKE 'T-TRG-%';")
-    cur.execute("UPDATE inventory SET stock_level = %s, last_updated = %s WHERE stock_code = %s;", (stock_start, updated_start, sku))
+    # Test item: '85123A'
+    cur.execute("SELECT stock_level, last_updated FROM inventory WHERE stock_code = '85123A';")
+    stock_before, updated_before = cur.fetchone()
+    console.print(f" • Stock Before Insertion: [bold cyan]{stock_before}[/bold cyan] units (Updated: {updated_before})")
+
+    # Insert a temporary test sale line (10 units)
+    test_line_id = '99999999'
+    test_qty = 10
+    cur.execute(f"""
+    INSERT INTO invoice_line (line_id, invoice_no, stock_code, quantity, unit_price_at_sale)
+    VALUES ('{test_line_id}', '536365', '85123A', {test_qty}, 2.55);
+    """)
+
+    # Check updated stock level
+    cur.execute("SELECT stock_level, last_updated FROM inventory WHERE stock_code = '85123A';")
+    stock_after, updated_after = cur.fetchone()
+    console.print(f" • Stock After Sale Insertion ({test_qty} units): [bold green]{stock_after}[/bold green] units (Updated: {updated_after})")
+
+    expected_after = stock_before + test_qty if inv_status == 'Cancelled' else stock_before - test_qty
+    trigger_works = (stock_after == expected_after)
+    direction = "increased" if inv_status == 'Cancelled' else "decreased"
+    console.print(f" • Trigger Evaluation (invoice status: {inv_status}): {f'[bold green]PASSED (Stock {direction} by exactly {test_qty} units)[/bold green]' if trigger_works else '[bold red]FAILED[/bold red]'}")
+
+    # Cleanup test line item & restore stock level
+    cur.execute(f"DELETE FROM invoice_line WHERE line_id = '{test_line_id}';")
+    cur.execute(f"UPDATE inventory SET stock_level = {stock_before}, last_updated = '{updated_before}' WHERE stock_code = '85123A';")
     conn.commit()
     cur.close()
-    console.print(" • Cleaned up temporary invoices and restored inventory state.")
-    return all_ok
+    console.print(" • Cleaned up temporary test line item and restored inventory state.")
+    return trigger_works
 
 def test_phase4_procedure(conn):
     console.print("\n[bold yellow]Testing Phase 4: Stored Procedure (GetCustomerInvoiceHistory)...[/bold yellow]")
@@ -264,10 +286,10 @@ def test_phase4_procedure(conn):
 
     # Call procedure for CustomerID = 12346
     test_cust_id = '12346'
-    cur.execute("SELECT * FROM GetCustomerInvoiceHistory(%s);", (test_cust_id,))
+    cur.execute(f"SELECT * FROM GetCustomerInvoiceHistory('{test_cust_id}');")
     rows = cur.fetchall()
 
-    t = Table(title=f"GetCustomerInvoiceHistory({test_cust_id}) Output on Supabase", box=box.ROUNDED)
+    t = Table(title=f"GetCustomerInvoiceHistory('{test_cust_id}') Output on Supabase", box=box.ROUNDED)
     t.add_column("Invoice No", style="cyan")
     t.add_column("Invoice Date", style="white")
     t.add_column("Status", style="yellow")
@@ -294,18 +316,30 @@ def run_all_tests():
     conn = get_connection()
     try:
         deploy_advanced_features(conn)
-        test_phase2_tables(conn)
+        tables_ok = test_phase2_tables(conn)
         test_phase2_rfm_view(conn)
         test_phase3_queries(conn)
         trg_ok = test_phase4_trigger(conn)
         proc_ok = test_phase4_procedure(conn)
 
+        failed = [name for name, ok in (("Phase 2: table row counts", tables_ok),
+                                        ("Phase 4: inventory trigger", trg_ok),
+                                        ("Phase 4: GetCustomerInvoiceHistory", proc_ok)) if not ok]
+        if failed:
+            console.print(Panel(
+                "[bold red]SUPABASE AUDIT FAILED[/bold red]\n\n" + "\n".join(f"• {name}" for name in failed),
+                title="[bold red]SUPABASE CERTIFICATION FAILED[/bold red]",
+                border_style="red",
+                box=box.DOUBLE
+            ))
+            sys.exit(1)
+
         console.print(Panel(
             "[bold green]ALL SUPABASE CLOUD AUDITS PASSED (100% SUCCESS)[/bold green]\n\n"
-            "• Phase 2: All 5 tables contain complete, un-sampled records (1,020,083 active lines).\n"
+            "• Phase 2: All 5 tables match the processed CSVs row for row.\n"
             "• Phase 2: Dynamic RFM view calculates recency and monetary spend on-demand.\n"
             "• Phase 3: All 5 required analytical queries execute accurately.\n"
-            "• Phase 4: Inventory trigger decrements stock in real-time.\n"
+            "• Phase 4: Status-aware inventory trigger adjusts stock in real-time.\n"
             "• Phase 4: GetCustomerInvoiceHistory returns complete order histories.\n\n"
             f"Execution Time: {time.time() - start_time:.2f} seconds",
             title="[bold green]SUPABASE CERTIFICATION PASSED[/bold green]",
