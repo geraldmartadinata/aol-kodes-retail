@@ -81,7 +81,7 @@ Master directory storing individual registered customers and guest checkouts.
 | customer_id | VARCHAR(10) | PRIMARY KEY | Unique customer identifier. |
 | customer_name | VARCHAR(100) | NOT NULL | Customer full legal/display name. |
 | email | VARCHAR(150) | NOT NULL, UNIQUE | Unique account email address. |
-| phone_number | VARCHAR(30) | NULL | Customer contact telephone number. |
+| phone_number | VARCHAR(30) | NOT NULL | Customer contact telephone number. |
 | address | VARCHAR(200) | NOT NULL | Customer delivery address street line. |
 | city | VARCHAR(100) | NOT NULL | Customer domicile city. |
 | customer_type | VARCHAR(20) | NOT NULL | Membership category ('Registered' or 'Guest'). |
@@ -127,5 +127,5 @@ Atomic transaction items capturing historical sales.
 | line_id | CHAR(8) | PRIMARY KEY | Fixed 8-character surrogate identifier for each transaction line item. |
 | invoice_no | VARCHAR(20) | NOT NULL, FK REFERENCES invoice(invoice_no) | Reference to parent invoice header. |
 | stock_code | VARCHAR(30) | NOT NULL, FK REFERENCES product(stock_code) | Reference to catalog product purchased. |
-| quantity | INT | NOT NULL | Units purchased (positive values for sales, negative for adjustments). |
+| quantity | INT | NOT NULL | Units purchased (always positive; the direction of the stock movement comes from `invoice.status`). |
 | unit_price_at_sale | DECIMAL(10,2) | NOT NULL, DEFAULT 0.00 | Actual unit price billed at the time of sale. |
