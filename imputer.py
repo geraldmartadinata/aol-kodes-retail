@@ -396,12 +396,12 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
     }
     is_admin = df['StockCode'].isin(admin_stockcodes) | df['StockCode'].str.startswith('GIFT_0001_')
     is_missing_desc = df['Description'].isna() | (df['Description'].astype(str).str.strip() == '')
-    is_non_uk_missing_cust = df['Customer ID'].isna() & (df['Country'] != 'United Kingdom')
+    
 
-    union_delete_mask = is_admin | is_missing_desc | is_non_uk_missing_cust
+    union_delete_mask = is_admin | is_missing_desc
     total_union_deleted = union_delete_mask.sum()
     df = df[~union_delete_mask].copy()
-    console.print(f" [bold green][OK][/bold green] Purged [bold yellow]{total_union_deleted:,}[/bold yellow] rows via union deletion (Admin SKU, blank Desc, non-UK blank Customer ID).")
+    console.print(f" [bold green][OK][/bold green] Purged [bold yellow]{total_union_deleted:,}[/bold yellow] rows via union deletion (Admin SKU, blank Desc).")
 
     with Progress(
         SpinnerColumn("dots", style="cyan"),
@@ -451,7 +451,7 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
 
     console.print(f" [bold green][OK][/bold green] Unified timestamps for all invoices (MIN date rule applied).")
     console.print(f" [bold green][OK][/bold green] Standardized descriptions; imputed [bold yellow]{n_imputed:,}[/bold yellow] genuine Price=0 rows; flagged [bold yellow]{n_note:,}[/bold yellow] zero-price staff-note rows as 'Loss'.")
-    console.print(f" [bold green][OK][/bold green] Allocated all anonymous UK checkouts to Single Guest Account (customer_id = 0).")
+    console.print(f" [bold green][OK][/bold green] Allocated all anonymous checkouts to Single Guest Account (customer_id = 0).")
 
     with Progress(
         SpinnerColumn("dots", style="cyan"),
