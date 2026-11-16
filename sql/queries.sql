@@ -50,8 +50,16 @@ WHERE i.status = 'Completed'
 GROUP BY i.country
 ORDER BY total_sales_revenue DESC;
 
--- high spending customers
-SELECT 
+-- Compare registered customers with completed purchases.
+WITH customer_spending AS (
+    SELECT i.customer_id, SUM(l.quantity * l.unit_price_at_sale) AS customer_spend
+    FROM invoice i
+    JOIN invoice_line l ON i.invoice_no = l.invoice_no
+    JOIN customer c ON c.customer_id = i.customer_id
+    WHERE i.status = 'Completed' AND c.customer_type = 'Registered'
+    GROUP BY i.customer_id
+)
+SELECT
     c.customer_id,
     c.customer_name,
     c.email,
@@ -59,29 +67,10 @@ SELECT
     c.city,
     c.customer_type,
     c.country,
-    ROUND(SUM(l.quantity * l.unit_price_at_sale), 2) AS customer_total_spend
-FROM customer c
-JOIN invoice i 
-    ON c.customer_id = i.customer_id
-JOIN invoice_line l 
-    ON i.invoice_no = l.invoice_no
-WHERE i.status = 'Completed'
-  AND c.customer_type = 'Registered'
-GROUP BY c.customer_id, c.customer_name, c.email, c.phone_number, c.city, c.customer_type, c.country
-HAVING SUM(l.quantity * l.unit_price_at_sale) > (
-    SELECT AVG(customer_spend)
-    FROM (
-        SELECT SUM(sub_l.quantity * sub_l.unit_price_at_sale) AS customer_spend
-        FROM invoice sub_i
-        JOIN invoice_line sub_l 
-            ON sub_i.invoice_no = sub_l.invoice_no
-        JOIN customer sub_c 
-            ON sub_i.customer_id = sub_c.customer_id
-        WHERE sub_i.status = 'Completed'
-          AND sub_c.customer_type = 'Registered'
-        GROUP BY sub_i.customer_id
-    ) AS all_customers_summary
-)
+    ROUND(s.customer_spend, 2) AS customer_total_spend
+FROM customer_spending s
+JOIN customer c ON c.customer_id = s.customer_id
+WHERE s.customer_spend > (SELECT AVG(customer_spend) FROM customer_spending)
 ORDER BY customer_total_spend DESC;
 
 -- products outside germany
@@ -89,26 +78,12 @@ SELECT
     p.stock_code,
     p.description,
     p.current_unit_price,
-    COUNT(DISTINCT i.country)   AS purchasing_countries_count
+    COUNT(DISTINCT i.country) AS purchasing_countries_count
 FROM product p
-JOIN invoice_line l 
-    ON p.stock_code = l.stock_code
-JOIN invoice i 
-    ON l.invoice_no = i.invoice_no
+JOIN invoice_line l ON p.stock_code = l.stock_code
+JOIN invoice i ON l.invoice_no = i.invoice_no
 WHERE i.status = 'Completed'
-  AND p.stock_code NOT IN (
-      SELECT DISTINCT sub_l.stock_code
-      FROM invoice sub_i
-      JOIN invoice_line sub_l 
-          ON sub_i.invoice_no = sub_l.invoice_no
-      WHERE sub_i.country = 'Germany'
-        AND sub_i.status = 'Completed'
-  )
-GROUP BY 
-    p.stock_code, 
-    p.description, 
-    p.current_unit_price
-having COUNT(DISTINCT i.country) >= 2
-ORDER BY 
-    purchasing_countries_count DESC, 
-    p.stock_code ASC;
+GROUP BY p.stock_code
+HAVING COUNT(DISTINCT i.country) >= 2
+   AND COUNT(*) FILTER (WHERE i.country = 'Germany') = 0
+ORDER BY purchasing_countries_count DESC, p.stock_code ASC;
