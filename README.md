@@ -1,6 +1,6 @@
 # KoDes Retail Store — Relational Database System Overhaul
 
-A production-grade relational database overhaul transforming denormalized transactional flat-file exports from KoDes Retail into a Third Normal Form (3NF) relational database architecture deployed on PostgreSQL (Supabase) and portable SQLite.
+A relational database coursework project that transforms KoDes Retail's denormalized transaction export into a normalized schema for PostgreSQL (Supabase) and local SQLite use.
 
 ---
 
@@ -10,7 +10,7 @@ KoDes Retail, an Indonesian-based retail store specializing in all-occasion gift
 
 1. **Update Anomalies**: Product descriptions and prices were duplicated across hundreds of thousands of transaction lines, leading to descriptive drift and inconsistent historical catalog records.
 2. **Deletion Anomalies**: Removing or voiding an invoice line risked permanently erasing catalog SKU metadata for seasonal or discontinued products.
-3. **Insertion Anomalies**: New inventory items or customer accounts could not be registered into the system without an accompanying transaction.
+3. **Insertion Anomalies**: The source flat file mixed product, customer, and transaction facts, making it difficult to add a product or customer independently of a transaction.
 4. **Data Redundancy & Inconsistency**: Conflicting invoice timestamps, drifting customer geographic attributes, and untracked warehouse inventory balances compromised reporting reliability.
 
 This project executes a complete end-to-end relational database overhaul across four structured phases:
@@ -80,7 +80,7 @@ The database schema is modeled using standard Crow's Foot notation, detailing pr
 | | `invoice_no` | `VARCHAR(20)` | `FK, NOT NULL` | References `invoice(invoice_no)` (`ON DELETE CASCADE`) |
 | | `stock_code` | `VARCHAR(30)` | `FK, NOT NULL` | References `product(stock_code)` (`ON DELETE RESTRICT`) |
 | | `quantity` | `INT` | `NOT NULL` | Normalized billed units purchased |
-| | `unit_price_at_sale` | `DECIMAL(10,2)` | `NOT NULL, CHECK (>=0)` | Actual unit price charged, including discount; stored independently of product reference price |
+| | `unit_price_at_sale` | `DECIMAL(10,2)` | `NOT NULL, CHECK (>=0)` | Actual unit price charged, including discount; historical list price is not stored |
 
 ---
 
@@ -115,7 +115,7 @@ The project strictly imports the **entire 100% un-sampled dataset** into Postgre
 
 #### Data Imputation & Standardization Rules:
 1. **Unified Guest Account (`customer_id = '0'`)**: Retains anonymous transactions from all 15 countries in one guest profile so `invoice.customer_id` satisfies `NOT NULL`. `invoice.country` keeps the actual transaction country; the Guest profile's country value is only a label.
-2. **Catalog Price Imputation**: Zero-priced lines of genuine products (706 lines) are imputed using the arithmetic mean price of the corresponding `stock_code`; zero-priced staff-note lines such as `CHECK`, `FOUND` or `AMAZON` (254 lines) are classified as `'Loss'` instead of being priced.
+2. **Transaction Price Imputation**: Zero-priced lines of genuine products (709 lines) are imputed using the arithmetic mean price of the corresponding `stock_code`; zero-priced staff-note lines such as `CHECK`, `FOUND` or `AMAZON` (254 lines) are classified as `'Loss'` instead of being priced.
 3. **Multi-Timestamp Resolution**: Multi-timestamp invoices are resolved to a single canonical timestamp using $\min(\text{invoice\_date})$.
 4. **Description & Residency Uniformity**: Each SKU keeps its most frequent description on genuine priced lines (SKUs with no genuine sale are named `UNLISTED RETAIL ITEM`); `customer.country` is the customer's most frequent country, while `invoice.country` keeps the transaction country.
 5. **Invoice Status Classification**:
@@ -140,14 +140,14 @@ The project strictly imports the **entire 100% un-sampled dataset** into Postgre
 
 All analytical scenarios are implemented in [`sql/queries.sql`](sql/queries.sql). Benchmarks are taken from the ZIP reference unless explicitly stated otherwise.
 
-### Query 1: Price Adjustment Campaign (`UPDATE`)
-Adjusts catalog prices upward by 8% for all products currently priced under $5.00:
+### Query 1: Price Adjustment Scenario (`UPDATE`)
+The assignment scenario adjusts product reference prices upward by 8% when they are below 5.00 source-currency units:
 ```sql
 UPDATE product
 SET current_unit_price = ROUND(current_unit_price * 1.08, 2)
 WHERE current_unit_price < 5.00;
 ```
-*Impact*: Updates 3,859 qualifying catalog products while preserving historical prices recorded on historical `invoice_line.unit_price_at_sale`.
+*Impact*: Updates 3,859 qualifying product reference prices while preserving historical prices recorded on `invoice_line.unit_price_at_sale`. In the processed dataset, `current_unit_price` is a historical median proxy, so this is a SQL scenario rather than an operational price recommendation.
 
 ### Query 2: Order Cancellation Processing (`UPDATE`)
 Soft-cancels an order (`invoice_no = '536365'`) without deleting historical transaction lines, preserving audit compliance:
@@ -157,7 +157,7 @@ SET status = 'Cancelled'
 WHERE invoice_no = '536365'
   AND status = 'Completed';
 ```
-*Impact*: Updates the invoice header while leaving its 7 detail rows (total £139.12) in place. The optional cancellation trigger in `advanced.sql` restores the stock quantities. This preserves transaction rows; it does not keep a separate history of prior status values.
+*Impact*: Updates the invoice header while leaving its 7 detail rows (total 139.12 source-currency units) in place. The cancellation trigger in `advanced.sql` restores the stock quantities. This preserves transaction rows; it does not keep a separate history of prior status values.
 
 ### Query 3: Regional Sales Breakdown (`JOIN` & `GROUP BY`)
 Generates total completed revenue and invoice volume per country, ordered from highest revenue to lowest:
@@ -249,33 +249,7 @@ ORDER BY purchasing_countries_count DESC, p.stock_code ASC;
 All automation features are implemented in [`sql/advanced.sql`](sql/advanced.sql).
 
 ### 5.1 Real-Time Status-Aware Inventory Trigger
-Maintains warehouse stock levels automatically whenever transactions are recorded:
-```sql
-CREATE OR REPLACE FUNCTION fn_trg_update_inventory()
-RETURNS TRIGGER AS $$
-DECLARE
-    v_status VARCHAR(20);
-BEGIN
-    SELECT status INTO v_status
-    FROM invoice
-    WHERE invoice_no = NEW.invoice_no;
-
-    UPDATE product
-    SET 
-        stock_level  = stock_level + CASE WHEN v_status = 'Cancelled' THEN NEW.quantity ELSE -NEW.quantity END,
-        last_updated = CURRENT_TIMESTAMP
-    WHERE stock_code = NEW.stock_code;
-
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trg_update_inventory
-AFTER INSERT ON invoice_line
-FOR EACH ROW
-EXECUTE FUNCTION fn_trg_update_inventory();
-```
-*Business Rule*: Evaluates invoice status at time of insertion: `Completed` and `Loss` lines decrement `product.stock_level`; `Cancelled` lines replenish it. Opening stock is assumed to be 1,000 per SKU.
+The implementation is in [`sql/advanced.sql`](sql/advanced.sql). Its statement-level trigger updates the stock for inserted detail rows in a batch: `Completed` and `Loss` reduce stock; `Cancelled` increases it. A second trigger restores stock when a `Completed` invoice is changed to `Cancelled`. Opening stock is assumed to be 1,000 per SKU, so the processed stock levels are illustrative rather than verified warehouse balances.
 
 ### 5.2 Customer Invoice History Stored Procedure
 A parameterized routine returning a customer's complete chronological transaction ledger:
@@ -343,17 +317,17 @@ GROUP BY c.customer_id, c.customer_name, c.email, c.city, c.customer_type, c.cou
 
 ```text
 aol-kodes-retail/
-├── data/
-│   ├── processed/                      # Phase 2: Full 100% un-sampled production CSVs
+├── data/                               # Local data directory (ignored by Git)
+│   ├── processed/                      # Phase 2: Full processed CSVs
 │   │   ├── customers.csv               # 5,877 customer records
 │   │   ├── products.csv                # 4,755 catalog SKU records
 │   │   ├── invoices.csv                # 47,915 invoice header records
 │   │   └── invoice_lines.csv           # 1,022,975 line items (un-sampled; no PK)
 │   ├── raw/                            # Source export (online_retail_data_dedup.csv)
-│   └── retail.db                       # Portable SQLite 3NF database
-├── backup/
-│   ├── kodes_retail_dump.sql           # Database backup: Standard SQL DDL & DML dump
-│   └── kodes_retail_backup.db          # Database backup: Verified binary SQLite database
+│   └── retail.db                       # Generated by build_retail_db.py; absent until built
+├── backup/                             # Generated by export_backup.py; absent until exported
+│   ├── kodes_retail_dump.sql
+│   └── kodes_retail_backup.db
 ├── docs/
 │   ├── ERD.md                          # Phase 1: Architectural documentation & 3NF proof
 │   ├── erd.png                         # Phase 1: High-resolution Crow's Foot ERD image
@@ -382,7 +356,7 @@ aol-kodes-retail/
 | **Phase 2: DDL Script** | [`sql/schema.sql`](sql/schema.sql) | Complete `CREATE TABLE`, PK/FK, `ON DELETE`/`UPDATE`, `CHECK` constraints |
 | **Phase 3: DML Script** | [`sql/queries.sql`](sql/queries.sql) | Production DML queries answering Scenarios 1 through 5 |
 | **Phase 4: Automation Script** | [`sql/advanced.sql`](sql/advanced.sql) | Inventory management trigger & `GetCustomerInvoiceHistory` procedure |
-| **Database Backup** | [`backup/kodes_retail_dump.sql`](backup/kodes_retail_dump.sql), [`backup/kodes_retail_backup.db`](backup/kodes_retail_backup.db) | Complete SQL DDL+DML backup export & verified binary SQLite database |
+| **Database Backup** | [`scripts/export_backup.py`](scripts/export_backup.py) | Generates SQL and binary backups after the local SQLite database has been built; outputs are not currently present |
 | **Full Production Data** | [`data/processed/`](data/processed/) | Full un-sampled normalized CSVs (1,022,975 invoice lines) |
 | **ETL Audit Trail** | [`docs/KoDes_Phase1_Master_Documentation.md`](docs/KoDes_Phase1_Master_Documentation.md) | Master documentation, current ERD decisions, processed-data results, and design trade-offs |
 
@@ -394,12 +368,12 @@ aol-kodes-retail/
 * Python 3.11 or newer
 * [`uv`](https://docs.astral.sh/uv/) package manager (recommended) or standard `pip`
 
-### 7.2 Run Automated Verification Test Suite
-To verify the schema, data row counts, RFM view, all 5 analytical queries, the inventory trigger, and the stored procedure on live PostgreSQL:
+### 7.2 Live Supabase Audit
+This script connects to live Supabase and installs/replaces the functions and triggers in `sql/advanced.sql` before checking row counts and queries. It is write-capable, not a read-only local test:
 ```bash
 uv run scripts/test_supabase.py
 ```
-*Expected Result*: 100% pass across all test modules (Row counts match, View query works, Queries 1–5 execute successfully, Trigger adjusts stock, Procedure returns customer history).
+Run it only when you intend to apply those database routines to the connected Supabase project.
 
 ### 7.3 Build Local SQLite Database
 To build `data/retail.db` directly from processed production CSVs with foreign key integrity checks:
@@ -418,6 +392,7 @@ To push schema and stream all 1,022,975 invoice lines to cloud PostgreSQL:
 ```bash
 uv run scripts/sync_supabase.py --push
 ```
+The push applies `sql/schema.sql`, which drops and recreates the project tables before loading the CSVs. Existing data in those tables will be replaced.
 To pull cloud table records into local CSV files:
 ```bash
 uv run scripts/sync_supabase.py --pull

@@ -112,10 +112,10 @@ def test_phase2_rfm_view(conn):
     t.add_column("Type", style="white")
     t.add_column("Country", style="white")
     t.add_column("Completed Invoices", justify="right", style="green")
-    t.add_column("Lifetime Spend", justify="right", style="yellow")
+    t.add_column("Lifetime Spend (source units)", justify="right", style="yellow")
 
     for r in rows:
-        t.add_row(str(r[0]), str(r[1]), str(r[2]), f"{r[3]:,}", f"${r[4]:,.2f}")
+        t.add_row(str(r[0]), str(r[1]), str(r[2]), f"{r[3]:,}", f"{r[4]:,.2f}")
     console.print(t)
     cur.close()
 
@@ -124,7 +124,7 @@ def test_phase3_queries(conn):
     cur = conn.cursor()
 
     # Query 1: Price Adjustment Campaign Simulation
-    console.print("\n[bold cyan]1. Scenario 1: Price Adjustment Campaign (+8% for items < $5.00)[/bold cyan]")
+    console.print("\n[bold cyan]1. Scenario 1: Price Adjustment Scenario (+8% for prices under 5.00 source units)[/bold cyan]")
     cur.execute("""
     SELECT stock_code, description, current_unit_price, ROUND(current_unit_price * 1.08, 2) AS new_price
     FROM product
@@ -139,7 +139,7 @@ def test_phase3_queries(conn):
     t1.add_column("Current Price", justify="right")
     t1.add_column("Simulated +8% Price", justify="right", style="green")
     for r in q1_rows:
-        t1.add_row(r[0], r[1][:30], f"${r[2]:.2f}", f"${r[3]:.2f}")
+        t1.add_row(r[0], r[1][:30], f"{r[2]:.2f}", f"{r[3]:.2f}")
     console.print(t1)
 
     # Query 2: Order Cancellation
@@ -166,10 +166,10 @@ def test_phase3_queries(conn):
     t3 = Table(box=box.ROUNDED)
     t3.add_column("Country", style="cyan")
     t3.add_column("Completed Invoices", justify="right")
-    t3.add_column("Total Revenue", justify="right", style="green")
-    t3.add_column("Avg Line Value", justify="right")
+    t3.add_column("Total Revenue (source units)", justify="right", style="green")
+    t3.add_column("Avg Line Value (source units)", justify="right")
     for r in cur.fetchall():
-        t3.add_row(r[0], f"{r[1]:,}", f"${r[2]:,.2f}", f"${r[3]:,.2f}")
+        t3.add_row(r[0], f"{r[1]:,}", f"{r[2]:,.2f}", f"{r[3]:,.2f}")
     console.print(t3)
 
     # Query 4: VIP High Spenders
@@ -204,9 +204,9 @@ def test_phase3_queries(conn):
     t4 = Table(box=box.ROUNDED)
     t4.add_column("Customer ID", style="cyan")
     t4.add_column("Country", style="white")
-    t4.add_column("Total Lifetime Spend", justify="right", style="green")
+    t4.add_column("Total Lifetime Spend (source units)", justify="right", style="green")
     for r in cur.fetchall():
-        t4.add_row(str(r[0]), r[2], f"${r[3]:,.2f}")
+        t4.add_row(str(r[0]), r[2], f"{r[3]:,.2f}")
     console.print(t4)
 
     # Query 5: Product Cross-Selling (Never purchased by German customers, >= 2 other countries)
@@ -294,10 +294,10 @@ def test_phase4_procedure(conn):
     t.add_column("Status", style="yellow")
     t.add_column("Country", style="white")
     t.add_column("Items Count", justify="right")
-    t.add_column("Total Value", justify="right", style="green")
+    t.add_column("Total Value (source units)", justify="right", style="green")
 
     for r in rows:
-        t.add_row(r[0], str(r[1]), r[2], r[3], str(r[4]), f"${r[5]:,.2f}")
+        t.add_row(r[0], str(r[1]), r[2], r[3], str(r[4]), f"{r[5]:,.2f}")
 
     console.print(t)
     cur.close()

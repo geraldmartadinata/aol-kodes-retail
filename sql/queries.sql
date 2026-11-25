@@ -1,3 +1,5 @@
+-- Assignment scenario only: the processed product price is a historical proxy,
+-- not a verified live catalog price.
 -- preview price update
 select 
     stock_code,
@@ -31,7 +33,7 @@ GROUP BY i.invoice_no, i.invoice_date, i.customer_id, i.status;
 UPDATE invoice
 SET status = 'Cancelled'
 WHERE invoice_no = '536365'
-  AND status <> 'Cancelled';
+  AND status = 'Completed';
 
 -- check invoice status
 SELECT invoice_no, customer_id, status 

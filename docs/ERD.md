@@ -117,6 +117,6 @@ The schema follows the lecturer's no-PK direction for this table. As a consequen
 
 - Customer, invoice, product, and invoice-line facts are separated by their business roles.
 - Inventory attributes are stored with `product`, avoiding a separate one-to-one entity.
-- `unit_price_at_sale` records the amount actually charged, so a discount remains visible in transaction history. It is not automatically replaced when the product reference price changes.
+- `unit_price_at_sale` records the amount actually charged, so a discounted transaction amount remains unchanged in history. The schema does not store the list price at the transaction time, so it cannot calculate the discount amount after the product reference price changes.
 - The associative `invoice_line` table has no key because of the lecturer's requirement. This is a stated design exception: SQL can contain duplicate rows, so strict relational set uniqueness is not enforced for invoice details.
 - The RFM reporting view derives customer aggregates instead of storing them in `customer`.
