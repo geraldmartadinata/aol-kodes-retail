@@ -1,4 +1,4 @@
--- sync inventory function (status-aware)
+-- synchronize product stock (status-aware)
 -- invoice_line.quantity is always positive; the direction comes from invoice.status:
 --   Completed -> stock decreases | Cancelled (return/credit) -> stock increases | Loss (write-off) -> stock decreases
 CREATE OR REPLACE FUNCTION fn_trg_update_inventory()
@@ -10,7 +10,7 @@ BEGIN
     FROM invoice
     WHERE invoice_no = NEW.invoice_no;
 
-    UPDATE inventory
+    UPDATE product
     SET 
         stock_level  = stock_level + CASE WHEN v_status = 'Cancelled' THEN NEW.quantity ELSE -NEW.quantity END,
         last_updated = CURRENT_TIMESTAMP
@@ -45,7 +45,7 @@ begin
         i.invoice_date,
         i.status,
         i.country,
-        COUNT(l.line_id)                                                AS total_line_items,
+        COUNT(l.invoice_no)                                            AS total_line_items,
         ROUND(COALESCE(SUM(l.quantity * l.unit_price_at_sale), 0), 2)  AS total_invoice_value
     FROM invoice i
     LEFT JOIN invoice_line l 
@@ -65,9 +65,9 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION fn_trg_restore_inventory_on_cancel()
 RETURNS TRIGGER AS $$
 BEGIN
-    UPDATE inventory inv
+    UPDATE product p
     SET 
-        stock_level  = inv.stock_level + s.qty,
+        stock_level  = p.stock_level + s.qty,
         last_updated = CURRENT_TIMESTAMP
     FROM (
         SELECT stock_code, SUM(quantity) AS qty
@@ -75,7 +75,7 @@ BEGIN
         WHERE invoice_no = NEW.invoice_no
         GROUP BY stock_code
     ) s
-    WHERE inv.stock_code = s.stock_code;
+    WHERE p.stock_code = s.stock_code;
 
     RETURN NEW;
 END;
@@ -89,9 +89,11 @@ FOR EACH ROW
 WHEN (OLD.status = 'Completed' AND NEW.status = 'Cancelled')
 EXECUTE FUNCTION fn_trg_restore_inventory_on_cancel();
 
--- DEMO (run manually after import; uncomment): a sale lowers stock by 10
--- SELECT stock_code, stock_level FROM inventory WHERE stock_code = '85123A';
+-- DEMO (run manually after import; uncomment): a sale lowers stock by 10.
+-- unit_price_at_sale is the actual amount charged (possibly discounted); it is
+-- supplied by the caller and is not overwritten from product.current_unit_price.
+-- SELECT stock_code, stock_level FROM product WHERE stock_code = '85123A';
 -- INSERT INTO invoice VALUES ('DEMO-1', CURRENT_TIMESTAMP, '0', 'United Kingdom', 'Completed', 'Cash');
--- INSERT INTO invoice_line VALUES ((SELECT LPAD((MAX(line_id)::INT + 1)::TEXT, 8, '0') FROM invoice_line), 'DEMO-1', '85123A', 10, 2.50);
--- SELECT stock_code, stock_level FROM inventory WHERE stock_code = '85123A';
+-- INSERT INTO invoice_line VALUES ('DEMO-1', '85123A', 10, 2.50);
+-- SELECT stock_code, stock_level FROM product WHERE stock_code = '85123A';
 -- SELECT * FROM GetCustomerInvoiceHistory('12346');

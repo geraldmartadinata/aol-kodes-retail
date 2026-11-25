@@ -15,7 +15,7 @@ KoDes Retail, an Indonesian-based retail store specializing in all-occasion gift
 
 This project executes a complete end-to-end relational database overhaul across four structured phases:
 * **Phase 1**: Conceptual analysis, 3NF normalization, and Entity-Relationship Diagram (ERD) design using Crow's Foot notation.
-* **Phase 2**: Physical Data Definition Language (DDL) implementation (`sql/schema.sql`), integrity constraints, and a 100% un-sampled data load (1,020,083 line items).
+* **Phase 2**: Physical Data Definition Language (DDL) implementation (`sql/schema.sql`), integrity constraints, and a full un-sampled data load (1,022,975 line items).
 * **Phase 3**: Five real-world Data Manipulation Language (DML) transactions and analytical queries (`sql/queries.sql`).
 * **Phase 4**: Database automation via status-aware inventory triggers and customer invoice history stored procedures (`sql/advanced.sql`).
 
@@ -27,17 +27,16 @@ This project executes a complete end-to-end relational database overhaul across 
 
 The relational schema strictly satisfies Third Normal Form (3NF) criteria:
 
-* **First Normal Form (1NF)**: Every table column contains atomic values, all repeating groups are separated into distinct line-item records, and each entity possesses a unique primary key (`customer_id`, `stock_code`, `invoice_no`, `line_id`).
-* **Second Normal Form (2NF)**: All tables are in 1NF and every non-key attribute is fully functionally dependent on the entire primary key. In `invoice_line`, attributes (`quantity`, `unit_price_at_sale`) depend on the surrogate primary key `line_id`, eliminating partial composite key dependencies.
-* **Third Normal Form (3NF)**: All tables are in 2NF with zero transitive functional dependencies ($X \rightarrow Y \rightarrow Z$). Derived metrics (such as customer lifetime spend, first/last purchase timestamps, and total order counts) are intentionally excluded from the physical `customer` table and calculated dynamically via analytical views (`view_customer_rfm`), preventing update and synchronization anomalies.
+* **1NF and 3NF design**: Customer, invoice, product, and line-item facts are stored in separate relations with atomic attributes; catalog and inventory attributes are in `product`. RFM aggregates are calculated through `view_customer_rfm`, not copied into customer rows.
+* **Instructor-directed line table exception**: `invoice_line` is the associative table between `invoice` and `product` and intentionally has no primary key or surrogate line ID. Its two foreign keys preserve parent references. Since the source can repeat `(invoice_no, stock_code)`, exact duplicate detail rows are not uniquely addressable in this design.
 
 ### 2.2 Justification of Added Business Attributes
 
 To support full enterprise retail operations beyond the minimal transaction columns, the schema incorporates essential operational attributes:
-1. **Customer Contact & Demographic Profile** (`customer_name`, `email`, `phone_number`, `address`, `city`): Supports customer account authentication, logistics routing, order dispatch notifications, and unique customer identification (`UNIQUE` email).
-2. **Customer Segmentation** (`customer_type`): Differentiates authenticated accounts (`'Registered'`) from unauthenticated one-time purchasers (`'Guest'`), preserving data integrity while maintaining statistical separation.
-3. **Inventory Management Ledger** (`inventory` table: `stock_level`, `reorder_level`, `last_updated`): Establishes a dedicated 1:1 warehouse inventory ledger linked to catalog products, facilitating automated stock depletion and replenishment triggers.
-4. **Financial Reconciliation** (`payment_method`): Records the payment instrument (`'Credit Card'`, `'PayPal'`, `'Bank Transfer'`, `'Cash'`) to support financial audits.
+1. **Customer profile fields** (`customer_name`, `email`, `phone_number`, `address`, `city`) are synthetic placeholders; they are not source contact records.
+2. **Customer segmentation** (`customer_type`) distinguishes source customer IDs from anonymous transactions grouped under Guest ID `0`.
+3. **Inventory attributes** (`stock_level`, `reorder_level`, `last_updated`) are stored directly in `product` to avoid a separate one-to-one table. Opening stock is an assumption; reorder level is derived from demand.
+4. **Payment method** is generated deterministically because the source does not record payment instruments; it is not suitable for financial reconciliation.
 
 ### 2.3 Entity-Relationship Diagram (ERD)
 
@@ -51,39 +50,37 @@ The database schema is modeled using standard Crow's Foot notation, detailing pr
 * **`customer` (1) to `invoice` (N)**: One customer can place zero, one, or multiple invoices over time (`1:N`). Each invoice belongs to exactly one customer (`ON DELETE RESTRICT`).
 * **`invoice` (1) to `invoice_line` (N)**: An invoice comprises one or many individual line items (`1:N`). Purging an invoice cascades to its line items (`ON DELETE CASCADE`).
 * **`product` (1) to `invoice_line` (N)**: A product catalog SKU appears on zero, one, or multiple invoice line items (`1:N`). Deletion of a catalog product referenced by transactions is restricted (`ON DELETE RESTRICT`).
-* **`product` (1) to `inventory` (1)**: Every product in the catalog has exactly one corresponding warehouse inventory record tracking its real-time stock balance (`1:1`).
 
 ### 2.4 Data Dictionary
 
 | Table | Attribute | Data Type | Constraint | Description |
 |:---|:---|:---|:---|:---|
 | **customer** | `customer_id` | `VARCHAR(10)` | `PK, NOT NULL` | Unique customer identifier (e.g., `'17850'`, `'0'` for guest) |
-| | `customer_name` | `VARCHAR(100)` | `NOT NULL` | Full customer legal/contact name |
-| | `email` | `VARCHAR(150)` | `NOT NULL, UNIQUE` | Customer contact email address |
-| | `phone_number` | `VARCHAR(30)` | `NOT NULL` | Contact telephone number |
-| | `address` | `VARCHAR(200)` | `NOT NULL` | Delivery street address |
-| | `city` | `VARCHAR(100)` | `NOT NULL` | City of residence |
+| | `customer_name` | `VARCHAR(100)` | `NOT NULL` | Synthetic display name |
+| | `email` | `VARCHAR(150)` | `NOT NULL, UNIQUE` | Synthetic `example.com` email |
+| | `phone_number` | `VARCHAR(30)` | `NOT NULL` | Synthetic phone number |
+| | `address` | `VARCHAR(200)` | `NOT NULL` | Synthetic address |
+| | `city` | `VARCHAR(100)` | `NOT NULL` | Synthetic city assignment |
 | | `customer_type` | `VARCHAR(20)` | `NOT NULL, CHECK` | Account classification (`'Registered'`, `'Guest'`) |
 | | `country` | `VARCHAR(60)` | `NOT NULL` | Country of primary residence |
 | **product** | `stock_code` | `VARCHAR(30)` | `PK, NOT NULL` | Stock Keeping Unit (SKU) identifier |
 | | `description` | `VARCHAR(255)` | `NOT NULL` | Canonical merchandise description |
 | | `category` | `VARCHAR(50)` | `NOT NULL` | Merchandising category classification |
-| | `current_unit_price` | `DECIMAL(10,2)` | `NOT NULL, CHECK (>=0)` | Current active catalog price |
-| **inventory** | `stock_code` | `VARCHAR(30)` | `PK, FK, NOT NULL` | References `product(stock_code)` (`ON DELETE CASCADE`) |
-| | `stock_level` | `INT` | `NOT NULL, DEFAULT 1000` | Units available in warehouse |
-| | `reorder_level` | `INT` | `NOT NULL, CHECK (>=0)` | Minimum inventory safety threshold |
-| | `last_updated` | `TIMESTAMP` | `NOT NULL, DEFAULT NOW` | Timestamp of latest stock balance update |
+| | `current_unit_price` | `DECIMAL(10,2)` | `NOT NULL, CHECK (>=0)` | Product reference price; median positive historical price proxy in this processed dataset |
+| | `stock_level` | `INT` | `NOT NULL, DEFAULT 1000` | Assumed opening stock quantity |
+| | `reorder_level` | `INT` | `NOT NULL, CHECK (>=0)` | Demand-derived replenishment threshold |
+| | `last_updated` | `TIMESTAMP` | `NOT NULL, DEFAULT NOW` | Processing/update timestamp |
 | **invoice** | `invoice_no` | `VARCHAR(20)` | `PK, NOT NULL` | Unique transaction order number |
 | | `invoice_date` | `TIMESTAMP` | `NOT NULL` | Canonical order placement timestamp |
 | | `customer_id` | `VARCHAR(10)` | `FK, NOT NULL` | References `customer(customer_id)` (`ON DELETE RESTRICT`) |
 | | `country` | `VARCHAR(60)` | `NOT NULL` | Order shipping destination country |
 | | `status` | `VARCHAR(20)` | `NOT NULL, CHECK` | Order lifecycle status (`'Completed'`, `'Cancelled'`, `'Loss'`) |
-| | `payment_method` | `VARCHAR(20)` | `NOT NULL, CHECK` | Transaction payment instrument |
-| **invoice_line** | `line_id` | `CHAR(8)` | `PK, NOT NULL` | Zero-padded 8-character unique line identifier |
+| | `payment_method` | `VARCHAR(20)` | `NOT NULL, CHECK` | Synthetic invoice-level value |
+| **invoice_line** | — | — | **No PK, per lecturer direction** | Associative table; invoice and product references are FKs |
 | | `invoice_no` | `VARCHAR(20)` | `FK, NOT NULL` | References `invoice(invoice_no)` (`ON DELETE CASCADE`) |
 | | `stock_code` | `VARCHAR(30)` | `FK, NOT NULL` | References `product(stock_code)` (`ON DELETE RESTRICT`) |
 | | `quantity` | `INT` | `NOT NULL` | Normalized billed units purchased |
-| | `unit_price_at_sale` | `DECIMAL(10,2)` | `NOT NULL, CHECK (>=0)` | Unit price billed at point of sale |
+| | `unit_price_at_sale` | `DECIMAL(10,2)` | `NOT NULL, CHECK (>=0)` | Actual unit price charged, including discount; stored independently of product reference price |
 
 ---
 
@@ -94,8 +91,8 @@ The database schema is modeled using standard Crow's Foot notation, detailing pr
 The physical schema is implemented in [`sql/schema.sql`](sql/schema.sql) and enforces strict referential integrity, domain constraints, and performance indexes:
 
 * **Primary & Foreign Key Architecture**:
-  * `pk_customer`, `pk_product`, `pk_inventory`, `pk_invoice`, `pk_invoice_line` designate authoritative single-attribute primary keys.
-  * Referential integrity actions (`ON DELETE RESTRICT` on master tables, `ON DELETE CASCADE` from invoices to lines, and `ON UPDATE CASCADE` across all foreign keys) eliminate orphan records.
+  * Primary keys are defined on `customer`, `product`, and `invoice`. `invoice_line` has two foreign keys and no primary key, per lecturer direction.
+  * Referential integrity actions (`ON DELETE RESTRICT` on customer/product references, `ON DELETE CASCADE` from invoices to lines, and `ON UPDATE CASCADE` across foreign keys) prevent orphan references.
 * **Integrity Constraints**:
   * Domain `CHECK` constraints on `invoice.status IN ('Completed', 'Cancelled', 'Loss')`.
   * Domain `CHECK` constraints on `customer.customer_type IN ('Registered', 'Guest')`.
@@ -112,18 +109,18 @@ The project strictly imports the **entire 100% un-sampled dataset** into Postgre
 #### Deletion Budget Summary (10.0% Ceiling Compliance)
 * **Raw Export Records**: 1,067,371 rows (complete export, 01/12/2009 – 09/12/2011; the first single-sheet Excel copy held only 1,048,575 rows because of Excel's worksheet row limit and stopped on 04/12/2011).
 * **Exact Duplicate Rows Purged**: 34,335 rows (3.22% of raw).
-* **Union of Admin SKUs, Empty Descriptions & Non-UK Anonymous Rows**: 12,953 rows (1.21% of raw; 90 rows matched more than one rule).
-* **Total Rows Purged**: 47,288 rows (**4.43%** of raw data), strictly remaining well within the 10.0% allowable deletion budget.
-* **Total Clean Transactions Loaded**: **1,020,083 line items** (100% full production ingest, zero sampling).
+* **Union of Admin SKUs and blank descriptions**: 10,061 rows from the deduplicated input; anonymous records from all countries are retained.
+* **Total Rows Purged**: 44,396 rows (**4.16%** of the complete source), within the 10.0% allowable deletion budget.
+* **Total Clean Transactions Loaded**: **1,022,975 line items** (full retained dataset, zero sampling).
 
 #### Data Imputation & Standardization Rules:
-1. **Unified UK Guest Account (`customer_id = '0'`)**: Preserves about £3.4M in authentic UK sales from anonymous checkouts while ensuring `invoice.customer_id` satisfies `NOT NULL` constraints.
+1. **Unified Guest Account (`customer_id = '0'`)**: Retains anonymous transactions from all 15 countries in one guest profile so `invoice.customer_id` satisfies `NOT NULL`. `invoice.country` keeps the actual transaction country; the Guest profile's country value is only a label.
 2. **Catalog Price Imputation**: Zero-priced lines of genuine products (706 lines) are imputed using the arithmetic mean price of the corresponding `stock_code`; zero-priced staff-note lines such as `CHECK`, `FOUND` or `AMAZON` (254 lines) are classified as `'Loss'` instead of being priced.
 3. **Multi-Timestamp Resolution**: Multi-timestamp invoices are resolved to a single canonical timestamp using $\min(\text{invoice\_date})$.
 4. **Description & Residency Uniformity**: Each SKU keeps its most frequent description on genuine priced lines (SKUs with no genuine sale are named `UNLISTED RETAIL ITEM`); `customer.country` is the customer's most frequent country, while `invoice.country` keeps the transaction country.
 5. **Invoice Status Classification**:
    * Cancellations (`'C'` prefix) are classified as `'Cancelled'`.
-   * Non-C negative transactions and zero-priced staff-note lines are classified as `'Loss'` (warehouse inventory adjustments/damages).
+   * Non-C negative-quantity lines and unrecoverable zero-priced staff-note lines are classified as `'Loss'`.
    * All quantities are stored as positive values ($|\text{quantity}|$); the direction of the stock movement comes from `invoice.status`.
    * Positive sales transactions are classified as `'Completed'`.
 6. **`DCGS*` codes are kept**: they are real merchandise (party bags, night lights, dog collars), not administrative codes.
@@ -134,15 +131,14 @@ The project strictly imports the **entire 100% un-sampled dataset** into Postgre
 |:---|:---:|:---:|
 | `customer` | **5,877** rows | Verified (5,876 registered + 1 unified guest) |
 | `product` | **4,755** rows | Verified catalog SKUs |
-| `inventory` | **4,755** rows | Verified warehouse balances (1:1 with product) |
-| `invoice` | **47,796** rows | Verified unique orders |
-| `invoice_line` | **1,020,083** rows | Verified atomic purchase line items |
+| `invoice` | **47,915** rows | Verified unique orders |
+| `invoice_line` | **1,022,975** rows | Retained detail rows; no primary key by lecturer direction |
 
 ---
 
 ## 4. Phase 3: Data Transactions & Queries (DML — `sql/queries.sql`)
 
-All analytical scenarios are implemented in [`sql/queries.sql`](sql/queries.sql) and validated against live data.
+All analytical scenarios are implemented in [`sql/queries.sql`](sql/queries.sql). Benchmarks are taken from the ZIP reference unless explicitly stated otherwise.
 
 ### Query 1: Price Adjustment Campaign (`UPDATE`)
 Adjusts catalog prices upward by 8% for all products currently priced under $5.00:
@@ -158,9 +154,10 @@ Soft-cancels an order (`invoice_no = '536365'`) without deleting historical tran
 ```sql
 UPDATE invoice
 SET status = 'Cancelled'
-WHERE invoice_no = '536365';
+WHERE invoice_no = '536365'
+  AND status = 'Completed';
 ```
-*Impact*: Successfully updates order status to `'Cancelled'` while preserving all 7 associated line items totaling £139.12 for accounting auditability.
+*Impact*: Updates the invoice header while leaving its 7 detail rows (total £139.12) in place. The optional cancellation trigger in `advanced.sql` restores the stock quantities. This preserves transaction rows; it does not keep a separate history of prior status values.
 
 ### Query 3: Regional Sales Breakdown (`JOIN` & `GROUP BY`)
 Generates total completed revenue and invoice volume per country, ordered from highest revenue to lowest:
@@ -177,7 +174,7 @@ WHERE i.status = 'Completed'
 GROUP BY i.country
 ORDER BY total_sales_revenue DESC;
 ```
-*Top Result*: United Kingdom generates $17,716,743.43 across 36,211 completed invoices, followed by EIRE ($587,332.78) and Netherlands ($550,803.81).
+*Top Result*: United Kingdom generates 17,716,602.07 across 36,210 completed invoices, followed by EIRE (624,259.93) and Netherlands (550,803.81).
 
 ### Query 4: VIP High-Spender Identification (Nested Subquery)
 Identifies registered VIP customers whose lifetime spend strictly exceeds the global average spend of all registered customers:
@@ -215,7 +212,7 @@ HAVING SUM(l.quantity * l.unit_price_at_sale) > (
 )
 ORDER BY customer_total_spend DESC;
 ```
-*Benchmark*: Returns 1,163 qualifying VIP registered customers whose lifetime spend strictly exceeds the global registered customer average, led by customer `'18102'` ($580,987.04) and `'14646'` ($527,781.92).
+*Benchmark*: Returns 1,163 qualifying VIP registered customers with average spend 2,918.47, led by customer `'18102'` (580,987.04) and `'14646'` (527,781.92).
 
 ### Query 5: Product Performance & Cross-Selling (Subquery / Complex Filtering)
 Identifies products never purchased by customers from Germany, but purchased by customers from at least two other countries:
@@ -243,7 +240,7 @@ GROUP BY p.stock_code, p.description, p.current_unit_price
 HAVING COUNT(DISTINCT i.country) >= 2
 ORDER BY purchasing_countries_count DESC, p.stock_code ASC;
 ```
-*Result*: Returns 1,487 cross-market products, led by items sold across up to 18 non-German countries (such as `'21888'` BINGO SET across 18 countries, and `'21912'` VINTAGE SNAKES & LADDERS across 17 countries).
+*Result*: Returns 1,505 cross-market products; `'21888'` BINGO SET and `'21912'` VINTAGE SNAKES & LADDERS each appear in 19 countries outside Germany.
 
 ---
 
@@ -263,7 +260,7 @@ BEGIN
     FROM invoice
     WHERE invoice_no = NEW.invoice_no;
 
-    UPDATE inventory
+    UPDATE product
     SET 
         stock_level  = stock_level + CASE WHEN v_status = 'Cancelled' THEN NEW.quantity ELSE -NEW.quantity END,
         last_updated = CURRENT_TIMESTAMP
@@ -278,7 +275,7 @@ AFTER INSERT ON invoice_line
 FOR EACH ROW
 EXECUTE FUNCTION fn_trg_update_inventory();
 ```
-*Business Rule*: Evaluates invoice status at time of insertion: completed purchases decrement stock (`-quantity`), while returns/cancellations replenish available inventory (`+quantity`).
+*Business Rule*: Evaluates invoice status at time of insertion: `Completed` and `Loss` lines decrement `product.stock_level`; `Cancelled` lines replenish it. Opening stock is assumed to be 1,000 per SKU.
 
 ### 5.2 Customer Invoice History Stored Procedure
 A parameterized routine returning a customer's complete chronological transaction ledger:
@@ -299,7 +296,7 @@ BEGIN
         i.invoice_date,
         i.status,
         i.country,
-        COUNT(l.line_id)                                                AS total_line_items,
+        COUNT(l.invoice_no)                                            AS total_line_items,
         ROUND(COALESCE(SUM(l.quantity * l.unit_price_at_sale), 0), 2)  AS total_invoice_value
     FROM invoice i
     LEFT JOIN invoice_line l 
@@ -350,9 +347,8 @@ aol-kodes-retail/
 │   ├── processed/                      # Phase 2: Full 100% un-sampled production CSVs
 │   │   ├── customers.csv               # 5,877 customer records
 │   │   ├── products.csv                # 4,755 catalog SKU records
-│   │   ├── inventory.csv               # 4,755 warehouse inventory records
-│   │   ├── invoices.csv                # 47,796 invoice header records
-│   │   └── invoice_lines.csv           # 1,020,083 line items (un-sampled)
+│   │   ├── invoices.csv                # 47,915 invoice header records
+│   │   └── invoice_lines.csv           # 1,022,975 line items (un-sampled; no PK)
 │   ├── raw/                            # Source export (online_retail_data_dedup.csv)
 │   └── retail.db                       # Portable SQLite 3NF database
 ├── backup/
@@ -362,7 +358,7 @@ aol-kodes-retail/
 │   ├── ERD.md                          # Phase 1: Architectural documentation & 3NF proof
 │   ├── erd.png                         # Phase 1: High-resolution Crow's Foot ERD image
 │   ├── erd.svg                         # Phase 1: Scalable vector Crow's Foot ERD
-│   └── KoDes_Retail_Documentation.md  # Step-by-step processing, table structures, row counts, queries + outputs
+│   └── KoDes_Phase1_Master_Documentation.md # Master documentation
 ├── scripts/
 │   ├── build_retail_db.py              # Compiles processed CSVs into local retail.db
 │   ├── export_backup.py                # Generates SQL dump and binary database backups
@@ -382,13 +378,13 @@ aol-kodes-retail/
 ### Mapping to Lecturer Deliverables:
 | Assignment Deliverable | Repository Path | Description |
 |:---|:---|:---|
-| **Phase 1: ERD** | [`docs/erd.png`](docs/erd.png), [`docs/erd.svg`](docs/erd.svg), [`docs/ERD.md`](docs/ERD.md) | 3NF Crow's Foot ERD with cardinalities, PK/FK, and data dictionary |
+| **Phase 1: ERD** | [`docs/erd.png`](docs/erd.png), [`docs/erd.svg`](docs/erd.svg), [`docs/ERD.md`](docs/ERD.md) | Crow's Foot ERD with the lecturer-directed no-PK associative table |
 | **Phase 2: DDL Script** | [`sql/schema.sql`](sql/schema.sql) | Complete `CREATE TABLE`, PK/FK, `ON DELETE`/`UPDATE`, `CHECK` constraints |
 | **Phase 3: DML Script** | [`sql/queries.sql`](sql/queries.sql) | Production DML queries answering Scenarios 1 through 5 |
 | **Phase 4: Automation Script** | [`sql/advanced.sql`](sql/advanced.sql) | Inventory management trigger & `GetCustomerInvoiceHistory` procedure |
 | **Database Backup** | [`backup/kodes_retail_dump.sql`](backup/kodes_retail_dump.sql), [`backup/kodes_retail_backup.db`](backup/kodes_retail_backup.db) | Complete SQL DDL+DML backup export & verified binary SQLite database |
-| **Full Production Data** | [`data/processed/`](data/processed/) | 100% un-sampled normalized CSVs (1,020,083 line items) |
-| **ETL Audit Trail** | [`docs/KoDes_Retail_Documentation.md`](docs/KoDes_Retail_Documentation.md) | Step-by-step data processing, table structures, row counts, and every query with its output (4.43% deleted) |
+| **Full Production Data** | [`data/processed/`](data/processed/) | Full un-sampled normalized CSVs (1,022,975 invoice lines) |
+| **ETL Audit Trail** | [`docs/KoDes_Phase1_Master_Documentation.md`](docs/KoDes_Phase1_Master_Documentation.md) | Master documentation, current ERD decisions, processed-data results, and design trade-offs |
 
 ---
 
@@ -418,7 +414,7 @@ uv run scripts/export_backup.py
 ```
 
 ### 7.5 Synchronize with Cloud PostgreSQL (Supabase)
-To push schema and stream all 1,020,083 records to cloud PostgreSQL:
+To push schema and stream all 1,022,975 invoice lines to cloud PostgreSQL:
 ```bash
 uv run scripts/sync_supabase.py --push
 ```

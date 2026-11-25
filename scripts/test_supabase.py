@@ -53,8 +53,8 @@ def deploy_advanced_features(conn):
     console.print(" [bold green][OK][/bold green] Status-aware inventory triggers and Function 'GetCustomerInvoiceHistory' active on Supabase.")
 
 # Fallback counts, only used when the processed CSVs are not on disk.
-FALLBACK_COUNTS = {"customer": 5877, "product": 4755, "inventory": 4755, "invoice": 47796, "invoice_line": 1020083}
-CSV_FILES = {"customer": "customers.csv", "product": "products.csv", "inventory": "inventory.csv",
+FALLBACK_COUNTS = {"customer": 5877, "product": 4755, "invoice": 47915, "invoice_line": 1022975}
+CSV_FILES = {"customer": "customers.csv", "product": "products.csv",
              "invoice": "invoices.csv", "invoice_line": "invoice_lines.csv"}
 
 def get_expected_counts():
@@ -250,20 +250,20 @@ def test_phase4_trigger(conn):
     inv_status = cur.fetchone()[0]
 
     # Test item: '85123A'
-    cur.execute("SELECT stock_level, last_updated FROM inventory WHERE stock_code = '85123A';")
+    cur.execute("SELECT stock_level, last_updated FROM product WHERE stock_code = '85123A';")
     stock_before, updated_before = cur.fetchone()
     console.print(f" • Stock Before Insertion: [bold cyan]{stock_before}[/bold cyan] units (Updated: {updated_before})")
 
     # Insert a temporary test sale line (10 units)
-    test_line_id = '99999999'
     test_qty = 10
+    cur.execute("SAVEPOINT inventory_trigger_test;")
     cur.execute(f"""
-    INSERT INTO invoice_line (line_id, invoice_no, stock_code, quantity, unit_price_at_sale)
-    VALUES ('{test_line_id}', '536365', '85123A', {test_qty}, 2.55);
+    INSERT INTO invoice_line (invoice_no, stock_code, quantity, unit_price_at_sale)
+    VALUES ('536365', '85123A', {test_qty}, 2.55);
     """)
 
     # Check updated stock level
-    cur.execute("SELECT stock_level, last_updated FROM inventory WHERE stock_code = '85123A';")
+    cur.execute("SELECT stock_level, last_updated FROM product WHERE stock_code = '85123A';")
     stock_after, updated_after = cur.fetchone()
     console.print(f" • Stock After Sale Insertion ({test_qty} units): [bold green]{stock_after}[/bold green] units (Updated: {updated_after})")
 
@@ -272,10 +272,9 @@ def test_phase4_trigger(conn):
     direction = "increased" if inv_status == 'Cancelled' else "decreased"
     console.print(f" • Trigger Evaluation (invoice status: {inv_status}): {f'[bold green]PASSED (Stock {direction} by exactly {test_qty} units)[/bold green]' if trigger_works else '[bold red]FAILED[/bold red]'}")
 
-    # Cleanup test line item & restore stock level
-    cur.execute(f"DELETE FROM invoice_line WHERE line_id = '{test_line_id}';")
-    cur.execute(f"UPDATE inventory SET stock_level = {stock_before}, last_updated = '{updated_before}' WHERE stock_code = '85123A';")
-    conn.commit()
+    # Roll back both the temporary detail row and the trigger's stock update.
+    cur.execute("ROLLBACK TO SAVEPOINT inventory_trigger_test;")
+    cur.execute("RELEASE SAVEPOINT inventory_trigger_test;")
     cur.close()
     console.print(" • Cleaned up temporary test line item and restored inventory state.")
     return trigger_works
@@ -336,7 +335,7 @@ def run_all_tests():
 
         console.print(Panel(
             "[bold green]ALL SUPABASE CLOUD AUDITS PASSED (100% SUCCESS)[/bold green]\n\n"
-            "• Phase 2: All 5 tables match the processed CSVs row for row.\n"
+            "• Phase 2: All 4 tables match the processed CSVs row for row.\n"
             "• Phase 2: Dynamic RFM view calculates recency and monetary spend on-demand.\n"
             "• Phase 3: All 5 required analytical queries execute accurately.\n"
             "• Phase 4: Status-aware inventory trigger adjusts stock in real-time.\n"

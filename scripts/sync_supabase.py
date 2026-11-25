@@ -98,10 +98,9 @@ def push_to_supabase(url: str):
     console.print("\n[bold yellow]Step 3: Fast Streaming CSV Data into Supabase Tables...[/bold yellow]")
     tables = [
         ("customer", data_dir / "customers.csv", "(customer_id, customer_name, email, phone_number, address, city, customer_type, country)"),
-        ("product", data_dir / "products.csv", "(stock_code, description, category, current_unit_price)"),
-        ("inventory", data_dir / "inventory.csv", "(stock_code, stock_level, reorder_level, last_updated)"),
+        ("product", data_dir / "products.csv", "(stock_code, description, category, current_unit_price, stock_level, reorder_level, last_updated)"),
         ("invoice", data_dir / "invoices.csv", "(invoice_no, invoice_date, customer_id, country, status, payment_method)"),
-        ("invoice_line", data_dir / "invoice_lines.csv", "(line_id, invoice_no, stock_code, quantity, unit_price_at_sale)"),
+        ("invoice_line", data_dir / "invoice_lines.csv", "(invoice_no, stock_code, quantity, unit_price_at_sale)"),
     ]
 
     for table_name, csv_path, cols in tables:
@@ -154,11 +153,10 @@ def pull_from_supabase(url: str):
     sqlite_db_path = PROJECT_ROOT / "data" / "retail.db"
 
     conn = psycopg2.connect(url)
-    tables = ["customer", "product", "inventory", "invoice", "invoice_line"]
+    tables = ["customer", "product", "invoice", "invoice_line"]
     csv_names = {
         "customer": "customers.csv",
         "product": "products.csv",
-        "inventory": "inventory.csv",
         "invoice": "invoices.csv",
         "invoice_line": "invoice_lines.csv"
     }

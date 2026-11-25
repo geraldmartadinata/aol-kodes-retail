@@ -14,23 +14,24 @@ UPDATE product
 SET current_unit_price = ROUND(current_unit_price * 1.08, 2)
 WHERE current_unit_price < 5.00;
 
--- check order details
+-- check order details before cancellation; the invoice and lines remain in the ledger
 SELECT 
     i.invoice_no,
     i.invoice_date,
     i.customer_id,
     i.status,
-    COUNT(l.line_id)                                    AS total_items,
+    COUNT(*)                                            AS total_items,
     ROUND(SUM(l.quantity * l.unit_price_at_sale), 2)    AS order_total
 FROM invoice i
 JOIN invoice_line l ON i.invoice_no = l.invoice_no
 WHERE i.invoice_no = '536365'
 GROUP BY i.invoice_no, i.invoice_date, i.customer_id, i.status;
 
--- cancel order
-update invoice
+-- cancel order without deleting the invoice or invoice_line records
+UPDATE invoice
 SET status = 'Cancelled'
-WHERE invoice_no = '536365';
+WHERE invoice_no = '536365'
+  AND status <> 'Cancelled';
 
 -- check invoice status
 SELECT invoice_no, customer_id, status 

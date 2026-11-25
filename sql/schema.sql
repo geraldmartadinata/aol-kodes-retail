@@ -2,6 +2,7 @@
 DROP VIEW IF EXISTS view_customer_rfm CASCADE;
 DROP TABLE IF EXISTS invoice_line CASCADE;
 DROP TABLE IF EXISTS invoice CASCADE;
+-- Remove the former one-to-one table when rebuilding an older project database.
 DROP TABLE IF EXISTS inventory CASCADE;
 DROP TABLE IF EXISTS product CASCADE;
 DROP TABLE IF EXISTS customer CASCADE;
@@ -27,23 +28,14 @@ CREATE TABLE product (
     stock_code          VARCHAR(30)     NOT NULL,
     description         VARCHAR(255)    NOT NULL,
     category            VARCHAR(50)     NOT NULL,
+    -- Reference/catalog price; processed data uses a historical median proxy.
     current_unit_price  DECIMAL(10, 2)  NOT NULL DEFAULT 0.00,
+    stock_level         INT             NOT NULL DEFAULT 1000,
+    reorder_level       INT             NOT NULL DEFAULT 100,
+    last_updated        TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT pk_product PRIMARY KEY (stock_code),
-    CONSTRAINT chk_product_price CHECK (current_unit_price >= 0.00)
-);
-
--- inventory table
-CREATE TABLE inventory (
-    stock_code      varchar(30)     NOT NULL,
-    stock_level     INT             NOT NULL DEFAULT 1000,
-    reorder_level   INT             NOT NULL DEFAULT 100,
-    last_updated    TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT pk_inventory PRIMARY KEY (stock_code),
-    CONSTRAINT chk_inventory_reorder CHECK (reorder_level >= 0),
-    CONSTRAINT fk_inventory_product FOREIGN KEY (stock_code)
-        REFERENCES product (stock_code)
-        ON UPDATE CASCADE
-        ON DELETE CASCADE
+    CONSTRAINT chk_product_price CHECK (current_unit_price >= 0.00),
+    CONSTRAINT chk_product_reorder CHECK (reorder_level >= 0)
 );
 
 -- invoice table
@@ -65,12 +57,11 @@ CREATE TABLE invoice (
 
 -- invoice line table
 CREATE TABLE invoice_line (
-    line_id             CHAR(8)         NOT NULL,
     invoice_no          VARCHAR(20)     NOT NULL,
     stock_code          VARCHAR(30)     NOT NULL,
     quantity            INT             NOT NULL,
-    unit_price_at_sale  DECIMAL(10, 2)  NOT NULL DEFAULT 0.00,
-    CONSTRAINT pk_invoice_line PRIMARY KEY (line_id),
+    -- Actual charged price, including discounts; independent of product reference price.
+    unit_price_at_sale  DECIMAL(10, 2)  NOT NULL,
     CONSTRAINT fk_line_invoice FOREIGN KEY (invoice_no)
         REFERENCES invoice (invoice_no)
         ON UPDATE CASCADE

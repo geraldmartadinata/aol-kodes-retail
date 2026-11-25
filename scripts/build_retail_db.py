@@ -6,7 +6,7 @@
 # ]
 # ///
 """
-Build data/retail.db (portable SQLite copy of the 3NF schema) from the five cleaned CSVs in data/processed/.
+Build data/retail.db (portable SQLite copy of the schema) from the four cleaned CSVs in data/processed/.
 
 The schema comes from sql/schema.sql and the cleaning from imputer.py (single source of truth). This script deliberately does no
 cleaning, so the CSVs, retail.db, the SQL scripts and the documentation can never disagree.
@@ -42,7 +42,6 @@ def load_ddl() -> str:
 FILES = [  # (table, csv name) - parents first so foreign keys are satisfied during load
     ("customer", "customers.csv"),
     ("product", "products.csv"),
-    ("inventory", "inventory.csv"),
     ("invoice", "invoices.csv"),
     ("invoice_line", "invoice_lines.csv"),
 ]

@@ -1,435 +1,86 @@
-import subprocess
 from pathlib import Path
-import math
-
-def generate_svg():
-    # Geometry constants
-    W, H = 1240, 1040
-    
-    # Diagonal line calculation between Product (740, 580) and Invoice_Line (500, 840)
-    px, py = 740, 580
-    ix, iy = 500, 840
-    p_dx, p_dy = ix - px, iy - py
-    p_dist = math.hypot(p_dx, p_dy)
-    ux, uy = p_dx / p_dist, p_dy / p_dist
-    nx, ny = -uy, ux
-
-    # Product side ticks (Exactly 1: ||) perpendicular to diagonal line
-    t1_x, t1_y = px + 12 * ux, py + 12 * uy
-    t2_x, t2_y = px + 20 * ux, py + 20 * uy
-    t1_a = (t1_x + 9 * nx, t1_y + 9 * ny)
-    t1_b = (t1_x - 9 * nx, t1_y - 9 * ny)
-    t2_a = (t2_x + 9 * nx, t2_y + 9 * ny)
-    t2_b = (t2_x - 9 * nx, t2_y - 9 * ny)
-
-    # Invoice Line side crow's foot (Zero or Many: o<) flush on vertical border x = 500
-    fork_base = (ix - 16 * ux, iy - 16 * uy)
-    prong_top = (ix, iy - 12)
-    prong_bot = (ix, iy + 12)
-    circ_center = (ix - 26 * ux, iy - 26 * uy)
-
-    # Midpoint for label
-    mid_x, mid_y = (px + ix) / 2, (py + iy) / 2
-
-    svg_content = f"""<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}">
-    <defs>
-        <filter id="card-shadow" x="-3%" y="-3%" width="106%" height="108%" filterUnits="userSpaceOnUse">
-            <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.06" />
-        </filter>
-    </defs>
-
-    <!-- Canvas Background -->
-    <rect width="{W}" height="{H}" fill="#f8fafc" />
-
-    <!-- Top Header Banner (Clean, Minimalist, No Subtitle, No Mojibake) -->
-    <rect x="0" y="0" width="{W}" height="64" fill="#0f172a" />
-    <rect x="0" y="61" width="{W}" height="3" fill="#3b82f6" />
-    <text x="40" y="40" font-family="'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif" font-size="22" font-weight="700" fill="#ffffff" letter-spacing="0.5">KoDes Retail ERD</text>
-
-    <!-- ========================================================================= -->
-    <!-- RELATIONSHIP CONNECTORS (CROW'S FOOT NOTATION)                             -->
-    <!-- ========================================================================= -->
-
-    <!-- 1. CUSTOMER to INVOICE (Vertical, places, 1 : N) -->
-    <!-- Line from (280, 384) to (280, 470) -->
-    <path d="M 280 384 L 280 470" fill="none" stroke="#334155" stroke-width="2" />
-    <!-- Customer side: Exactly 1 (||) -->
-    <line x1="271" y1="395" x2="289" y2="395" stroke="#334155" stroke-width="2" stroke-linecap="round" />
-    <line x1="271" y1="402" x2="289" y2="402" stroke="#334155" stroke-width="2" stroke-linecap="round" />
-    <!-- Label -->
-    <rect x="250" y="416" width="60" height="22" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="1" />
-    <text x="280" y="431" font-family="'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="600" fill="#334155" text-anchor="middle">places</text>
-    <!-- Invoice side: One or Many (|&lt;) -->
-    <line x1="271" y1="454" x2="289" y2="454" stroke="#334155" stroke-width="2" stroke-linecap="round" />
-    <path d="M 269 470 L 280 458 L 291 470" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" />
-
-    <!-- 2. INVOICE to INVOICE_LINE (Vertical, contains, 1 : N) -->
-    <!-- Line from (280, 700) to (280, 786) -->
-    <path d="M 280 700 L 280 786" fill="none" stroke="#334155" stroke-width="2" />
-    <!-- Invoice side: Exactly 1 (||) -->
-    <line x1="271" y1="711" x2="289" y2="711" stroke="#334155" stroke-width="2" stroke-linecap="round" />
-    <line x1="271" y1="718" x2="289" y2="718" stroke="#334155" stroke-width="2" stroke-linecap="round" />
-    <!-- Label -->
-    <rect x="245" y="732" width="70" height="22" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="1" />
-    <text x="280" y="747" font-family="'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="600" fill="#334155" text-anchor="middle">contains</text>
-    <!-- Invoice Line side: One or Many (|&lt;) -->
-    <line x1="271" y1="770" x2="289" y2="770" stroke="#334155" stroke-width="2" stroke-linecap="round" />
-    <path d="M 269 786 L 280 774 L 291 786" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" />
-
-    <!-- 3. PRODUCT to INVENTORY (Vertical, stock tracked in, 1 : 1) -->
-    <!-- Line from (960, 636) to (960, 786) -->
-    <path d="M 960 636 L 960 786" fill="none" stroke="#334155" stroke-width="2" />
-    <!-- Product side: Exactly 1 (||) -->
-    <line x1="951" y1="648" x2="969" y2="648" stroke="#334155" stroke-width="2" stroke-linecap="round" />
-    <line x1="951" y1="655" x2="969" y2="655" stroke="#334155" stroke-width="2" stroke-linecap="round" />
-    <!-- Label -->
-    <rect x="902" y="700" width="116" height="22" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="1" />
-    <text x="960" y="715" font-family="'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="600" fill="#334155" text-anchor="middle">stock tracked in</text>
-    <!-- Inventory side: Exactly 1 (||) -->
-    <line x1="951" y1="767" x2="969" y2="767" stroke="#334155" stroke-width="2" stroke-linecap="round" />
-    <line x1="951" y1="774" x2="969" y2="774" stroke="#334155" stroke-width="2" stroke-linecap="round" />
-
-    <!-- 4. PRODUCT to INVOICE_LINE (Diagonal, appears on, 1 : N optional) -->
-    <!-- Line from (740, 580) to (500, 840) -->
-    <path d="M {px} {py} L {ix} {iy}" fill="none" stroke="#334155" stroke-width="2" />
-    <!-- Product side: Exactly 1 (||) perpendicular to diagonal -->
-    <line x1="{t1_a[0]:.1f}" y1="{t1_a[1]:.1f}" x2="{t1_b[0]:.1f}" y2="{t1_b[1]:.1f}" stroke="#334155" stroke-width="2" stroke-linecap="round" />
-    <line x1="{t2_a[0]:.1f}" y1="{t2_a[1]:.1f}" x2="{t2_b[0]:.1f}" y2="{t2_b[1]:.1f}" stroke="#334155" stroke-width="2" stroke-linecap="round" />
-    <!-- Label at midpoint -->
-    <rect x="{mid_x - 45:.1f}" y="{mid_y - 11:.1f}" width="90" height="22" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="1" />
-    <text x="{mid_x:.1f}" y="{mid_y + 4:.1f}" font-family="'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="600" fill="#334155" text-anchor="middle">appears on</text>
-    <!-- Invoice Line side: Zero or Many (o&lt;) -->
-    <circle cx="{circ_center[0]:.1f}" cy="{circ_center[1]:.1f}" r="4.5" fill="#f8fafc" stroke="#334155" stroke-width="1.8" />
-    <!-- Crow's foot 3 prongs entering right border of INVOICE_LINE flush at (500, 840) -->
-    <path d="M {prong_top[0]} {prong_top[1]} L {fork_base[0]:.1f} {fork_base[1]:.1f} L {prong_bot[0]} {prong_bot[1]}" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" />
-
-
-    <!-- ========================================================================= -->
-    <!-- ENTITY 1: CUSTOMER (Top Left, x: 60, y: 90, w: 440, h: 294)               -->
-    <!-- ========================================================================= -->
-    <g transform="translate(60, 90)" filter="url(#card-shadow)">
-        <rect width="440" height="294" rx="8" ry="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" />
-        <path d="M 0 8 Q 0 0 8 0 L 432 0 Q 440 0 440 8 L 440 38 L 0 38 Z" fill="#1e293b" />
-        <text x="20" y="25" font-family="'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="700" fill="#ffffff" letter-spacing="0.5">CUSTOMER</text>
-
-        <!-- Row 1: customer_id [PK] -->
-        <rect x="0" y="38" width="440" height="32" fill="#f8fafc" />
-        <rect x="16" y="44" width="28" height="20" rx="3" ry="3" fill="#fef3c7" stroke="#f59e0b" stroke-width="1" />
-        <text x="30" y="58" font-family="'Segoe UI', Roboto, sans-serif" font-size="9" font-weight="700" fill="#b45309" text-anchor="middle">PK</text>
-        <text x="56" y="59" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="600" fill="#0f172a">customer_id</text>
-        <text x="424" y="59" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#475569" text-anchor="end">VARCHAR(10)</text>
-        <line x1="0" y1="70" x2="440" y2="70" stroke="#f1f5f9" stroke-width="1" />
-
-        <!-- Row 2: customer_name -->
-        <rect x="0" y="70" width="440" height="32" fill="#ffffff" />
-        <text x="56" y="91" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="500" fill="#334155">customer_name</text>
-        <text x="424" y="91" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#64748b" text-anchor="end">VARCHAR(100)</text>
-        <line x1="0" y1="102" x2="440" y2="102" stroke="#f1f5f9" stroke-width="1" />
-
-        <!-- Row 3: email [UK] -->
-        <rect x="0" y="102" width="440" height="32" fill="#f8fafc" />
-        <rect x="16" y="108" width="28" height="20" rx="3" ry="3" fill="#dcfce7" stroke="#16a34a" stroke-width="1" />
-        <text x="30" y="122" font-family="'Segoe UI', Roboto, sans-serif" font-size="9" font-weight="700" fill="#15803d" text-anchor="middle">UK</text>
-        <text x="56" y="123" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="600" fill="#0f172a">email</text>
-        <text x="424" y="123" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#475569" text-anchor="end">VARCHAR(150)</text>
-        <line x1="0" y1="134" x2="440" y2="134" stroke="#f1f5f9" stroke-width="1" />
-
-        <!-- Row 4: phone_number -->
-        <rect x="0" y="134" width="440" height="32" fill="#ffffff" />
-        <text x="56" y="155" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="500" fill="#334155">phone_number</text>
-        <text x="424" y="155" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#64748b" text-anchor="end">VARCHAR(30)</text>
-        <line x1="0" y1="166" x2="440" y2="166" stroke="#f1f5f9" stroke-width="1" />
-
-        <!-- Row 5: address -->
-        <rect x="0" y="166" width="440" height="32" fill="#f8fafc" />
-        <text x="56" y="187" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="500" fill="#334155">address</text>
-        <text x="424" y="187" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#64748b" text-anchor="end">VARCHAR(200)</text>
-        <line x1="0" y1="198" x2="440" y2="198" stroke="#f1f5f9" stroke-width="1" />
-
-        <!-- Row 6: city -->
-        <rect x="0" y="198" width="440" height="32" fill="#ffffff" />
-        <text x="56" y="219" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="500" fill="#334155">city</text>
-        <text x="424" y="219" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#64748b" text-anchor="end">VARCHAR(100)</text>
-        <line x1="0" y1="230" x2="440" y2="230" stroke="#f1f5f9" stroke-width="1" />
-
-        <!-- Row 7: customer_type -->
-        <rect x="0" y="230" width="440" height="32" fill="#f8fafc" />
-        <text x="56" y="251" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="500" fill="#334155">customer_type</text>
-        <text x="424" y="251" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#64748b" text-anchor="end">VARCHAR(20)</text>
-        <line x1="0" y1="262" x2="440" y2="262" stroke="#f1f5f9" stroke-width="1" />
-
-        <!-- Row 8: country -->
-        <rect x="0" y="262" width="440" height="32" fill="#ffffff" />
-        <text x="56" y="283" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="500" fill="#334155">country</text>
-        <text x="424" y="283" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#64748b" text-anchor="end">VARCHAR(60)</text>
-    </g>
-
-
-    <!-- ========================================================================= -->
-    <!-- ENTITY 2: INVOICE (Center Left, x: 60, y: 470, w: 440, h: 230)            -->
-    <!-- ========================================================================= -->
-    <g transform="translate(60, 470)" filter="url(#card-shadow)">
-        <rect width="440" height="230" rx="8" ry="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" />
-        <path d="M 0 8 Q 0 0 8 0 L 432 0 Q 440 0 440 8 L 440 38 L 0 38 Z" fill="#1e293b" />
-        <text x="20" y="25" font-family="'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="700" fill="#ffffff" letter-spacing="0.5">INVOICE</text>
-
-        <!-- Row 1: invoice_no [PK] -->
-        <rect x="0" y="38" width="440" height="32" fill="#f8fafc" />
-        <rect x="16" y="44" width="28" height="20" rx="3" ry="3" fill="#fef3c7" stroke="#f59e0b" stroke-width="1" />
-        <text x="30" y="58" font-family="'Segoe UI', Roboto, sans-serif" font-size="9" font-weight="700" fill="#b45309" text-anchor="middle">PK</text>
-        <text x="56" y="59" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="600" fill="#0f172a">invoice_no</text>
-        <text x="424" y="59" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#475569" text-anchor="end">VARCHAR(20)</text>
-        <line x1="0" y1="70" x2="440" y2="70" stroke="#f1f5f9" stroke-width="1" />
-
-        <!-- Row 2: invoice_date -->
-        <rect x="0" y="70" width="440" height="32" fill="#ffffff" />
-        <text x="56" y="91" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="500" fill="#334155">invoice_date</text>
-        <text x="424" y="91" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#64748b" text-anchor="end">TIMESTAMP</text>
-        <line x1="0" y1="102" x2="440" y2="102" stroke="#f1f5f9" stroke-width="1" />
-
-        <!-- Row 3: customer_id [FK] -->
-        <rect x="0" y="102" width="440" height="32" fill="#f8fafc" />
-        <rect x="16" y="108" width="28" height="20" rx="3" ry="3" fill="#e0f2fe" stroke="#0284c7" stroke-width="1" />
-        <text x="30" y="122" font-family="'Segoe UI', Roboto, sans-serif" font-size="9" font-weight="700" fill="#0369a1" text-anchor="middle">FK</text>
-        <text x="56" y="123" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="600" fill="#0f172a">customer_id</text>
-        <text x="424" y="123" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#475569" text-anchor="end">VARCHAR(10)</text>
-        <line x1="0" y1="134" x2="440" y2="134" stroke="#f1f5f9" stroke-width="1" />
-
-        <!-- Row 4: country -->
-        <rect x="0" y="134" width="440" height="32" fill="#ffffff" />
-        <text x="56" y="155" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="500" fill="#334155">country</text>
-        <text x="424" y="155" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#64748b" text-anchor="end">VARCHAR(60)</text>
-        <line x1="0" y1="166" x2="440" y2="166" stroke="#f1f5f9" stroke-width="1" />
-
-        <!-- Row 5: status -->
-        <rect x="0" y="166" width="440" height="32" fill="#f8fafc" />
-        <text x="56" y="187" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="500" fill="#334155">status</text>
-        <text x="424" y="187" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#64748b" text-anchor="end">VARCHAR(20)</text>
-        <line x1="0" y1="198" x2="440" y2="198" stroke="#f1f5f9" stroke-width="1" />
-
-        <!-- Row 6: payment_method -->
-        <rect x="0" y="198" width="440" height="32" fill="#ffffff" />
-        <text x="56" y="219" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="500" fill="#334155">payment_method</text>
-        <text x="424" y="219" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#64748b" text-anchor="end">VARCHAR(20)</text>
-    </g>
-
-
-    <!-- ========================================================================= -->
-    <!-- ENTITY 3: INVOICE_LINE (Bottom Left, x: 60, y: 786, w: 440, h: 198)       -->
-    <!-- ========================================================================= -->
-    <g transform="translate(60, 786)" filter="url(#card-shadow)">
-        <rect width="440" height="198" rx="8" ry="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" />
-        <path d="M 0 8 Q 0 0 8 0 L 432 0 Q 440 0 440 8 L 440 38 L 0 38 Z" fill="#1e293b" />
-        <text x="20" y="25" font-family="'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="700" fill="#ffffff" letter-spacing="0.5">INVOICE_LINE</text>
-
-        <!-- Row 1: line_id [PK] -->
-        <rect x="0" y="38" width="440" height="32" fill="#f8fafc" />
-        <rect x="16" y="44" width="28" height="20" rx="3" ry="3" fill="#fef3c7" stroke="#f59e0b" stroke-width="1" />
-        <text x="30" y="58" font-family="'Segoe UI', Roboto, sans-serif" font-size="9" font-weight="700" fill="#b45309" text-anchor="middle">PK</text>
-        <text x="56" y="59" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="600" fill="#0f172a">line_id</text>
-        <text x="424" y="59" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#475569" text-anchor="end">CHAR(8)</text>
-        <line x1="0" y1="70" x2="440" y2="70" stroke="#f1f5f9" stroke-width="1" />
-
-        <!-- Row 2: invoice_no [FK] -->
-        <rect x="0" y="70" width="440" height="32" fill="#ffffff" />
-        <rect x="16" y="76" width="28" height="20" rx="3" ry="3" fill="#e0f2fe" stroke="#0284c7" stroke-width="1" />
-        <text x="30" y="90" font-family="'Segoe UI', Roboto, sans-serif" font-size="9" font-weight="700" fill="#0369a1" text-anchor="middle">FK</text>
-        <text x="56" y="91" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="600" fill="#0f172a">invoice_no</text>
-        <text x="424" y="91" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#475569" text-anchor="end">VARCHAR(20)</text>
-        <line x1="0" y1="102" x2="440" y2="102" stroke="#f1f5f9" stroke-width="1" />
-
-        <!-- Row 3: stock_code [FK] -->
-        <rect x="0" y="102" width="440" height="32" fill="#f8fafc" />
-        <rect x="16" y="108" width="28" height="20" rx="3" ry="3" fill="#e0f2fe" stroke="#0284c7" stroke-width="1" />
-        <text x="30" y="122" font-family="'Segoe UI', Roboto, sans-serif" font-size="9" font-weight="700" fill="#0369a1" text-anchor="middle">FK</text>
-        <text x="56" y="123" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="600" fill="#0f172a">stock_code</text>
-        <text x="424" y="123" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#475569" text-anchor="end">VARCHAR(30)</text>
-        <line x1="0" y1="134" x2="440" y2="134" stroke="#f1f5f9" stroke-width="1" />
-
-        <!-- Row 4: quantity -->
-        <rect x="0" y="134" width="440" height="32" fill="#ffffff" />
-        <text x="56" y="155" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="500" fill="#334155">quantity</text>
-        <text x="424" y="155" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#64748b" text-anchor="end">INT</text>
-        <line x1="0" y1="166" x2="440" y2="166" stroke="#f1f5f9" stroke-width="1" />
-
-        <!-- Row 5: unit_price_at_sale -->
-        <rect x="0" y="166" width="440" height="32" fill="#f8fafc" />
-        <text x="56" y="187" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="500" fill="#334155">unit_price_at_sale</text>
-        <text x="424" y="187" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#64748b" text-anchor="end">DECIMAL(10,2)</text>
-    </g>
-
-
-    <!-- ========================================================================= -->
-    <!-- DIAGRAM LEGEND (Top Right, x: 740, y: 90, w: 440, h: 294)                 -->
-    <!-- ========================================================================= -->
-    <g transform="translate(740, 90)" filter="url(#card-shadow)">
-        <rect width="440" height="294" rx="8" ry="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" />
-        <path d="M 0 8 Q 0 0 8 0 L 432 0 Q 440 0 440 8 L 440 38 L 0 38 Z" fill="#334155" />
-        <text x="20" y="25" font-family="'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="700" fill="#ffffff" letter-spacing="0.5">DIAGRAM LEGEND</text>
-
-        <!-- Subheader: Key Constraints -->
-        <text x="20" y="62" font-family="'Segoe UI', Roboto, sans-serif" font-size="11.5" font-weight="700" fill="#475569" letter-spacing="0.3">KEY CONSTRAINTS</text>
-
-        <!-- PK -->
-        <rect x="20" y="74" width="28" height="20" rx="3" ry="3" fill="#fef3c7" stroke="#f59e0b" stroke-width="1" />
-        <text x="34" y="88" font-family="'Segoe UI', Roboto, sans-serif" font-size="9" font-weight="700" fill="#b45309" text-anchor="middle">PK</text>
-        <text x="58" y="89" font-family="'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="600" fill="#1e293b">Primary Key</text>
-        <text x="160" y="89" font-family="'Segoe UI', Roboto, sans-serif" font-size="11.5" font-weight="400" fill="#64748b">Unique row identifier</text>
-
-        <!-- FK -->
-        <rect x="20" y="104" width="28" height="20" rx="3" ry="3" fill="#e0f2fe" stroke="#0284c7" stroke-width="1" />
-        <text x="34" y="118" font-family="'Segoe UI', Roboto, sans-serif" font-size="9" font-weight="700" fill="#0369a1" text-anchor="middle">FK</text>
-        <text x="58" y="119" font-family="'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="600" fill="#1e293b">Foreign Key</text>
-        <text x="160" y="119" font-family="'Segoe UI', Roboto, sans-serif" font-size="11.5" font-weight="400" fill="#64748b">References parent table primary key</text>
-
-        <!-- UK -->
-        <rect x="20" y="134" width="28" height="20" rx="3" ry="3" fill="#dcfce7" stroke="#16a34a" stroke-width="1" />
-        <text x="34" y="148" font-family="'Segoe UI', Roboto, sans-serif" font-size="9" font-weight="700" fill="#15803d" text-anchor="middle">UK</text>
-        <text x="58" y="149" font-family="'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="600" fill="#1e293b">Unique Key</text>
-        <text x="160" y="149" font-family="'Segoe UI', Roboto, sans-serif" font-size="11.5" font-weight="400" fill="#64748b">Enforces column value uniqueness</text>
-
-        <line x1="20" y1="166" x2="420" y2="166" stroke="#e2e8f0" stroke-width="1" />
-
-        <!-- Subheader: Crow's Foot Cardinality -->
-        <text x="20" y="186" font-family="'Segoe UI', Roboto, sans-serif" font-size="11.5" font-weight="700" fill="#475569" letter-spacing="0.3">CROW'S FOOT CARDINALITY</text>
-
-        <!-- Exactly 1 -->
-        <g transform="translate(20, 198)">
-            <line x1="0" y1="10" x2="30" y2="10" stroke="#334155" stroke-width="1.8" />
-            <line x1="16" y1="3" x2="16" y2="17" stroke="#334155" stroke-width="1.8" />
-            <line x1="22" y1="3" x2="22" y2="17" stroke="#334155" stroke-width="1.8" />
-            <text x="48" y="14" font-family="'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="600" fill="#1e293b">Exactly One (1)</text>
-            <text x="165" y="14" font-family="'Segoe UI', Roboto, sans-serif" font-size="11.5" font-weight="400" fill="#64748b">Mandatory single parent</text>
-        </g>
-
-        <!-- One or More -->
-        <g transform="translate(20, 228)">
-            <line x1="0" y1="10" x2="30" y2="10" stroke="#334155" stroke-width="1.8" />
-            <line x1="12" y1="3" x2="12" y2="17" stroke="#334155" stroke-width="1.8" />
-            <path d="M 30 3 L 18 10 L 30 17" fill="none" stroke="#334155" stroke-width="1.8" stroke-linejoin="round" />
-            <text x="48" y="14" font-family="'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="600" fill="#1e293b">One or More (1..N)</text>
-            <text x="165" y="14" font-family="'Segoe UI', Roboto, sans-serif" font-size="11.5" font-weight="400" fill="#64748b">Mandatory multiple child</text>
-        </g>
-
-        <!-- Zero or More -->
-        <g transform="translate(20, 258)">
-            <line x1="0" y1="10" x2="30" y2="10" stroke="#334155" stroke-width="1.8" />
-            <circle cx="10" cy="10" r="4" fill="#ffffff" stroke="#334155" stroke-width="1.5" />
-            <path d="M 30 3 L 18 10 L 30 17" fill="none" stroke="#334155" stroke-width="1.8" stroke-linejoin="round" />
-            <text x="48" y="14" font-family="'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="600" fill="#1e293b">Zero or More (0..N)</text>
-            <text x="165" y="14" font-family="'Segoe UI', Roboto, sans-serif" font-size="11.5" font-weight="400" fill="#64748b">Optional multiple child</text>
-        </g>
-    </g>
-
-
-    <!-- ========================================================================= -->
-    <!-- ENTITY 4: PRODUCT (Center Right, x: 740, y: 470, w: 440, h: 166)          -->
-    <!-- ========================================================================= -->
-    <g transform="translate(740, 470)" filter="url(#card-shadow)">
-        <rect width="440" height="166" rx="8" ry="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" />
-        <path d="M 0 8 Q 0 0 8 0 L 432 0 Q 440 0 440 8 L 440 38 L 0 38 Z" fill="#1e293b" />
-        <text x="20" y="25" font-family="'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="700" fill="#ffffff" letter-spacing="0.5">PRODUCT</text>
-
-        <!-- Row 1: stock_code [PK] -->
-        <rect x="0" y="38" width="440" height="32" fill="#f8fafc" />
-        <rect x="16" y="44" width="28" height="20" rx="3" ry="3" fill="#fef3c7" stroke="#f59e0b" stroke-width="1" />
-        <text x="30" y="58" font-family="'Segoe UI', Roboto, sans-serif" font-size="9" font-weight="700" fill="#b45309" text-anchor="middle">PK</text>
-        <text x="56" y="59" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="600" fill="#0f172a">stock_code</text>
-        <text x="424" y="59" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#475569" text-anchor="end">VARCHAR(30)</text>
-        <line x1="0" y1="70" x2="440" y2="70" stroke="#f1f5f9" stroke-width="1" />
-
-        <!-- Row 2: description -->
-        <rect x="0" y="70" width="440" height="32" fill="#ffffff" />
-        <text x="56" y="91" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="500" fill="#334155">description</text>
-        <text x="424" y="91" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#64748b" text-anchor="end">VARCHAR(255)</text>
-        <line x1="0" y1="102" x2="440" y2="102" stroke="#f1f5f9" stroke-width="1" />
-
-        <!-- Row 3: category -->
-        <rect x="0" y="102" width="440" height="32" fill="#f8fafc" />
-        <text x="56" y="123" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="500" fill="#334155">category</text>
-        <text x="424" y="123" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#64748b" text-anchor="end">VARCHAR(50)</text>
-        <line x1="0" y1="134" x2="440" y2="134" stroke="#f1f5f9" stroke-width="1" />
-
-        <!-- Row 4: current_unit_price -->
-        <rect x="0" y="134" width="440" height="32" fill="#ffffff" />
-        <text x="56" y="155" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="500" fill="#334155">current_unit_price</text>
-        <text x="424" y="155" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#64748b" text-anchor="end">DECIMAL(10,2)</text>
-    </g>
-
-
-    <!-- ========================================================================= -->
-    <!-- ENTITY 5: INVENTORY (Bottom Right, x: 740, y: 786, w: 440, h: 166)        -->
-    <!-- ========================================================================= -->
-    <g transform="translate(740, 786)" filter="url(#card-shadow)">
-        <rect width="440" height="166" rx="8" ry="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" />
-        <path d="M 0 8 Q 0 0 8 0 L 432 0 Q 440 0 440 8 L 440 38 L 0 38 Z" fill="#1e293b" />
-        <text x="20" y="25" font-family="'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="700" fill="#ffffff" letter-spacing="0.5">INVENTORY</text>
-
-        <!-- Row 1: stock_code [PK] -->
-        <rect x="0" y="38" width="440" height="32" fill="#f8fafc" />
-        <rect x="16" y="44" width="28" height="20" rx="3" ry="3" fill="#fef3c7" stroke="#f59e0b" stroke-width="1" />
-        <text x="30" y="58" font-family="'Segoe UI', Roboto, sans-serif" font-size="9" font-weight="700" fill="#b45309" text-anchor="middle">PK</text>
-        <text x="56" y="59" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="600" fill="#0f172a">stock_code</text>
-        <text x="424" y="59" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#475569" text-anchor="end">VARCHAR(30)</text>
-        <line x1="0" y1="70" x2="440" y2="70" stroke="#f1f5f9" stroke-width="1" />
-
-        <!-- Row 2: stock_level -->
-        <rect x="0" y="70" width="440" height="32" fill="#ffffff" />
-        <text x="56" y="91" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="500" fill="#334155">stock_level</text>
-        <text x="424" y="91" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#64748b" text-anchor="end">INT</text>
-        <line x1="0" y1="102" x2="440" y2="102" stroke="#f1f5f9" stroke-width="1" />
-
-        <!-- Row 3: reorder_level -->
-        <rect x="0" y="102" width="440" height="32" fill="#f8fafc" />
-        <text x="56" y="123" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="500" fill="#334155">reorder_level</text>
-        <text x="424" y="123" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#64748b" text-anchor="end">INT</text>
-        <line x1="0" y1="134" x2="440" y2="134" stroke="#f1f5f9" stroke-width="1" />
-
-        <!-- Row 4: last_updated -->
-        <rect x="0" y="134" width="440" height="32" fill="#ffffff" />
-        <text x="56" y="155" font-family="'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="500" fill="#334155">last_updated</text>
-        <text x="424" y="155" font-family="'Consolas', 'Courier New', monospace" font-size="12" font-weight="500" fill="#64748b" text-anchor="end">TIMESTAMP</text>
-    </g>
-
-</svg>
-"""
-    docs_dir = Path("docs")
-    docs_dir.mkdir(parents=True, exist_ok=True)
-    svg_path = docs_dir / "erd.svg"
-    svg_path.write_text(svg_content, encoding="utf-8")
-    print(f"Generated clean SVG at: {svg_path.resolve()}")
-
-    # Render PNG using Microsoft Edge headless
-    png_path = docs_dir / "erd.png"
-    edge_paths = [
-        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"
-    ]
-    edge_exe = None
-    for ep in edge_paths:
-        if Path(ep).exists():
-            edge_exe = ep
-            break
-            
-    if edge_exe:
-        cmd = [
-            edge_exe,
-            "--headless=new",
-            "--disable-gpu",
-            f"--screenshot={png_path.resolve()}",
-            f"--window-size={W},{H}",
-            f"file:///{svg_path.resolve()}"
-        ]
-        try:
-            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            print(f"Rendered PNG screenshot at: {png_path.resolve()}")
-        except Exception as e:
-            print(f"Warning: Edge PNG generation failed: {e}")
-    else:
-        print("Note: Edge executable not found, skipping PNG render.")
-
-    return svg_path
-
-if __name__ == "__main__":
-    generate_svg()
+import subprocess
+
+W, H = 1600, 1080
+ROOT = Path(__file__).resolve().parent.parent
+OUT = ROOT / "docs"
+OUT.mkdir(parents=True, exist_ok=True)
+
+entities = [
+    {"name":"CUSTOMER", "x":70, "y":120, "w":610, "fields":[
+        ("customer_id", "VARCHAR(10)", "PK"), ("customer_name", "VARCHAR(100)", ""),
+        ("email", "VARCHAR(150)", "UQ"), ("phone_number", "VARCHAR(30)", ""),
+        ("address", "VARCHAR(200)", ""), ("city", "VARCHAR(100)", ""),
+        ("customer_type", "VARCHAR(20)", ""), ("country", "VARCHAR(60)", "")], "h": 38+8*40},
+    {"name":"INVOICE", "x":920, "y":120, "w":610, "fields":[
+        ("invoice_no", "VARCHAR(20)", "PK"), ("invoice_date", "TIMESTAMP", ""),
+        ("customer_id", "VARCHAR(10)", "FK"), ("country", "VARCHAR(60)", ""),
+        ("status", "VARCHAR(20)", ""), ("payment_method", "VARCHAR(20)", "")], "h": 38+6*40},
+    {"name":"PRODUCT", "x":70, "y":650, "w":610, "fields":[
+        ("stock_code", "VARCHAR(30)", "PK"), ("description", "VARCHAR(255)", ""),
+        ("category", "VARCHAR(50)", ""), ("current_unit_price", "DECIMAL(10,2)", ""),
+        ("stock_level", "INT", ""), ("reorder_level", "INT", ""),
+        ("last_updated", "TIMESTAMP", "")], "h": 38+7*40},
+    {"name":"INVOICE_LINE", "x":920, "y":650, "w":610, "fields":[
+        ("invoice_no", "VARCHAR(20)", "FK"), ("stock_code", "VARCHAR(30)", "FK"),
+        ("quantity", "INT", ""), ("unit_price_at_sale", "DECIMAL(10,2)", "")], "h": 38+4*40},
+]
+parts = [f'''<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">
+<defs><filter id="shadow" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#0f172a" flood-opacity=".12"/></filter></defs>
+<rect width="100%" height="100%" fill="#f1f5f9"/>
+<rect width="100%" height="72" fill="#0f172a"/><text x="52" y="46" fill="white" font-family="Segoe UI,Arial" font-size="27" font-weight="700">KoDes Retail — Relational ERD</text>
+<text x="52" y="102" fill="#475569" font-family="Segoe UI,Arial" font-size="17">Four entities • inventory attributes merged into PRODUCT • no primary key on INVOICE_LINE</text>
+''']
+# Relationship connectors in the clear gaps between entity cards.
+parts += ['''
+<!-- CUSTOMER to INVOICE: one customer may place zero or many invoices -->
+<path d="M 680 280 L 920 280" stroke="#334155" stroke-width="2.5" fill="none"/>
+<line x1="694" y1="270" x2="694" y2="290" stroke="#334155" stroke-width="2.5"/><line x1="701" y1="270" x2="701" y2="290" stroke="#334155" stroke-width="2.5"/>
+<circle cx="899" cy="280" r="5" fill="#f1f5f9" stroke="#334155" stroke-width="2"/>
+<path d="M 899 280 L 914 269 M 899 280 L 914 280 M 899 280 L 914 291" stroke="#334155" stroke-width="2.5" fill="none"/>
+<rect x="755" y="263" width="90" height="32" rx="6" fill="white" stroke="#cbd5e1"/><text x="800" y="284" text-anchor="middle" fill="#334155" font-family="Segoe UI,Arial" font-size="14">places</text>
+
+<!-- INVOICE to INVOICE_LINE: each detail belongs to one invoice; invoice has one or more details -->
+<path d="M 1225 398 L 1225 650" stroke="#334155" stroke-width="2.5" fill="none"/>
+<line x1="1215" y1="411" x2="1235" y2="411" stroke="#334155" stroke-width="2.5"/><line x1="1215" y1="418" x2="1235" y2="418" stroke="#334155" stroke-width="2.5"/>
+<line x1="1215" y1="632" x2="1235" y2="632" stroke="#334155" stroke-width="2.5"/>
+<path d="M 1213 650 L 1225 635 L 1237 650" stroke="#334155" stroke-width="2.5" fill="none"/>
+<rect x="1172" y="500" width="106" height="32" rx="6" fill="white" stroke="#cbd5e1"/><text x="1225" y="521" text-anchor="middle" fill="#334155" font-family="Segoe UI,Arial" font-size="14">contains</text>
+
+<!-- PRODUCT to INVOICE_LINE: a product may appear on zero or many details -->
+<path d="M 680 800 L 920 800" stroke="#334155" stroke-width="2.5" fill="none"/>
+<line x1="694" y1="790" x2="694" y2="810" stroke="#334155" stroke-width="2.5"/><line x1="701" y1="790" x2="701" y2="810" stroke="#334155" stroke-width="2.5"/>
+<circle cx="899" cy="800" r="5" fill="#f1f5f9" stroke="#334155" stroke-width="2"/>
+<path d="M 899 800 L 914 789 M 899 800 L 914 800 M 899 800 L 914 811" stroke="#334155" stroke-width="2.5" fill="none"/>
+<rect x="752" y="783" width="96" height="32" rx="6" fill="white" stroke="#cbd5e1"/><text x="800" y="804" text-anchor="middle" fill="#334155" font-family="Segoe UI,Arial" font-size="14">appears on</text>
+''']
+for e in entities:
+    x,y,w,h=e['x'],e['y'],e['w'],e['h']
+    parts.append(f'<g filter="url(#shadow)"><rect x="{x}" y="{y}" width="{w}" height="{h}" rx="9" fill="white" stroke="#cbd5e1" stroke-width="1.5"/><path d="M{x+9} {y} H{x+w-9} Q{x+w} {y} {x+w} {y+9} V{y+42} H{x} V{y+9} Q{x} {y} {x+9} {y}" fill="#1e293b"/><text x="{x+24}" y="{y+29}" fill="white" font-family="Segoe UI,Arial" font-size="17" font-weight="700">{e["name"]}</text></g>')
+    for i,(name,typ,key) in enumerate(e['fields']):
+        ry=y+42+i*40
+        fill='#f8fafc' if i%2==0 else '#ffffff'
+        parts.append(f'<rect x="{x+1}" y="{ry}" width="{w-2}" height="40" fill="{fill}"/>')
+        if key:
+            color='#fef3c7' if key=='PK' else ('#dcfce7' if key=='UQ' else '#e0f2fe')
+            stroke='#f59e0b' if key=='PK' else ('#16a34a' if key=='UQ' else '#0284c7')
+            ink='#92400e' if key=='PK' else ('#166534' if key=='UQ' else '#075985')
+            parts.append(f'<rect x="{x+16}" y="{ry+9}" width="35" height="22" rx="4" fill="{color}" stroke="{stroke}"/><text x="{x+33.5}" y="{ry+24}" text-anchor="middle" fill="{ink}" font-family="Segoe UI,Arial" font-size="10" font-weight="700">{key}</text>')
+        parts.append(f'<text x="{x+65 if key else x+22}" y="{ry+26}" fill="#1e293b" font-family="Consolas,monospace" font-size="15">{name}</text><text x="{x+w-20}" y="{ry+26}" text-anchor="end" fill="#64748b" font-family="Consolas,monospace" font-size="14">{typ}</text>')
+        if i<len(e['fields'])-1: parts.append(f'<line x1="{x+1}" y1="{ry+40}" x2="{x+w-1}" y2="{ry+40}" stroke="#e2e8f0"/>')
+parts.append('''
+<text x="70" y="1030" fill="#475569" font-family="Segoe UI,Arial" font-size="14">PK = primary key • FK = foreign key • UQ = unique constraint</text>
+<text x="920" y="1030" fill="#475569" font-family="Segoe UI,Arial" font-size="14">Foreign keys preserve references; invoice_line has no row-level key by design.</text>
+</svg>''')
+svg=''.join(parts)
+svg_path=OUT/'erd.svg'
+svg_path.write_text(svg, encoding='utf-8')
+print(f'Wrote {svg_path}')
+edge_candidates=[Path(r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'),Path(r'C:\Program Files\Microsoft\Edge\Application\msedge.exe')]
+edge=next((p for p in edge_candidates if p.exists()),None)
+if edge:
+    png=OUT/'erd.png'
+    subprocess.run([str(edge),'--headless=new','--disable-gpu',f'--screenshot={png}',f'--window-size={W},{H}',svg_path.as_uri()],check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    print(f'Wrote {png}')
+else:
+    print('Edge unavailable; SVG written, PNG not regenerated.')

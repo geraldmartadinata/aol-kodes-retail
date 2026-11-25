@@ -489,16 +489,15 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
         prod_df = prod_base.sort_values(by='stock_code')[['stock_code', 'description', 'category', 'current_unit_price']]
         progress.update(deconstruct_task, completed=50)
 
-        inventory_df = prod_df[['stock_code']].copy()
-        inventory_df['stock_level'] = 1000
+        prod_df['stock_level'] = 1000
         # reorder_level = ~2 weeks of average demand for the SKU (completed sales only),
         # rounded to the nearest 10 and kept between 20 and 500 (always below the 1000 opening stock).
         _sold = df[(~df['Invoice'].str.startswith('C')) & (df['Quantity'] > 0) & (~df['Loss_Note'])]
         _span_days = max((df['InvoiceDate'].max() - df['InvoiceDate'].min()).days + 1, 1)
         _lead_demand = _sold.groupby('StockCode')['Quantity'].sum() / _span_days * 14
         _reorder = ((_lead_demand / 10).round() * 10).clip(lower=20, upper=500)
-        inventory_df['reorder_level'] = inventory_df['stock_code'].map(_reorder).fillna(20).astype(int)
-        inventory_df['last_updated'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        prod_df['reorder_level'] = prod_df['stock_code'].map(_reorder).fillna(20).astype(int)
+        prod_df['last_updated'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         progress.update(deconstruct_task, completed=65)
 
         is_c_invoice = df['Invoice'].str.startswith('C')
@@ -531,9 +530,7 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
             'quantity': df['Quantity'].astype(int),
             'unit_price_at_sale': df['Price'].round(2)
         })
-        items_df.reset_index(drop=True, inplace=True)
-        items_df['line_id'] = (items_df.index + 1).astype(str).str.zfill(8)   # CHAR(8): '00000001' ... sorts correctly as text
-        items_df = items_df[['line_id', 'invoice_no', 'stock_code', 'quantity', 'unit_price_at_sale']]
+        items_df = items_df[['invoice_no', 'stock_code', 'quantity', 'unit_price_at_sale']]
         progress.update(deconstruct_task, completed=100)
 
     console.print(" [bold green][OK][/bold green] Relational deconstruction to 3NF schema completed.")
@@ -545,18 +542,15 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
         TimeElapsedColumn(),
         console=console
     ) as progress:
-        export_task = progress.add_task("[5/5] Writing production 3NF CSV files...", total=5)
+        export_task = progress.add_task("[5/5] Writing production 3NF CSV files...", total=4)
         
         cust_path = output_dir / "customers.csv"
         cust_df.to_csv(cust_path, index=False, encoding='utf-8')
         progress.advance(export_task)
         
         prod_path = output_dir / "products.csv"
+        prod_df = prod_df[['stock_code', 'description', 'category', 'current_unit_price', 'stock_level', 'reorder_level', 'last_updated']]
         prod_df.to_csv(prod_path, index=False, encoding='utf-8')
-        progress.advance(export_task)
-        
-        invt_path = output_dir / "inventory.csv"
-        inventory_df.to_csv(invt_path, index=False, encoding='utf-8')
         progress.advance(export_task)
         
         inv_path = output_dir / "invoices.csv"
@@ -572,7 +566,7 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
     console.print()
     results_table = Table(title="[bold green]3NF Normalized Relational Schema Summary[/bold green]", box=box.HEAVY_EDGE)
     results_table.add_column("Entity / Table", style="cyan", no_wrap=True)
-    results_table.add_column("Primary Key", style="yellow")
+    results_table.add_column("Key", style="yellow")
     results_table.add_column("Total Rows", justify="right", style="green")
     results_table.add_column("File Size", justify="right", style="magenta")
     results_table.add_column("Destination File", style="dim")
@@ -580,9 +574,8 @@ def clean_and_normalize(input_file: Path, output_dir: Path, guest_prefix: int = 
     tables = [
         ("CUSTOMER", "customer_id", len(cust_df), cust_path),
         ("PRODUCT", "stock_code", len(prod_df), prod_path),
-        ("INVENTORY", "stock_code", len(inventory_df), invt_path),
         ("INVOICE", "invoice_no", len(inv_df), inv_path),
-        ("INVOICE_LINE", "line_id", len(items_df), items_path),
+        ("INVOICE_LINE", "(no primary key)", len(items_df), items_path),
     ]
 
     for name, pk, rows, path in tables:
@@ -615,7 +608,6 @@ def audit_and_repair_processed(data_dir: Path):
     files = {
         "CUSTOMER": data_dir / "customers.csv",
         "PRODUCT": data_dir / "products.csv",
-        "INVENTORY": data_dir / "inventory.csv",
         "INVOICE": data_dir / "invoices.csv",
         "INVOICE_LINE": data_dir / "invoice_lines.csv",
     }
@@ -684,12 +676,8 @@ def audit_and_repair_processed(data_dir: Path):
     orphan_prod = len(child_prod - parent_prod)
     ref_table.add_row("FK_Line_Product", "PRODUCT(stock_code)", "INVOICE_LINE(stock_code)", str(orphan_prod), "[bold green]100% VALID[/bold green]" if orphan_prod == 0 else "[bold red]VIOLATION[/bold red]")
 
-    invt_prod = set(dfs["INVENTORY"]["stock_code"])
-    orphan_invt = len(invt_prod - parent_prod)
-    ref_table.add_row("FK_Inventory_Product", "PRODUCT(stock_code)", "INVENTORY(stock_code)", str(orphan_invt), "[bold green]100% VALID[/bold green]" if orphan_invt == 0 else "[bold red]VIOLATION[/bold red]")
-
     console.print(ref_table)
-    total_orphans = orphan_cust + orphan_inv + orphan_prod + orphan_invt
+    total_orphans = orphan_cust + orphan_inv + orphan_prod
 
     if total_nulls == 0 and total_orphans == 0 and is_cust_uniform and is_inv_uniform and is_pay_valid:
         lines = dfs["INVOICE_LINE"].copy()
@@ -715,7 +703,7 @@ def audit_and_repair_processed(data_dir: Path):
         console.print(stat_table)
         console.print(Panel(
             "[bold green]ALL QUALITY ASSURANCE AUDITS PASSED (100%)[/bold green]\n\n"
-            "• Zero Nulls across all 5 tables.\n"
+            "• Zero Nulls across all 4 tables.\n"
             "• Zero Orphan Foreign Keys (ACID referential constraints intact).\n"
             "• 3NF relational normalization certified.",
             title="[bold green]DATA INTEGRITY VERIFIED[/bold green]",
